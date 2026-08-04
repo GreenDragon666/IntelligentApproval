@@ -1,0 +1,14 @@
+# —— 步骤三运行时（确定性校验）：仅标准库即可 ——
+# src/schema, registry, engine, report, checkers
+
+# —— 步骤三编写期（规则 → 本地模型生成 checker）——
+langgraph>=0.2
+openai>=1.40              # 对接本地 vLLM 的 OpenAI 兼容接口，不出网
+# vllm                    # 起本地服务时安装：pip install vllm（体积大，按需）
+
+# —— 可选：语义相似度（rule_2/3 扩展）——
+# sentence-transformers>=3.0
+
+# —— 测试 ——
+pytest>=8.0
+# pymupdf>=1.24           # 仅 tests/helpers 从 PDF 造数时需要
