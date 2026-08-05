@@ -32,6 +32,9 @@ class Settings:
     # —— 代码生成流水线（编写期）——
     codegen_max_retries: int = int(os.getenv("CODEGEN_MAX_RETRIES", "3"))
     generated_dir: str = os.getenv("GENERATED_DIR", "generated_checkers")
+    checker_timeout: int = int(os.getenv("CHECKER_TIMEOUT", "30"))
+    review_max_retries: int = int(os.getenv("REVIEW_MAX_RETRIES", "1"))
+    review_max_evidence_chars: int = int(os.getenv("REVIEW_MAX_EVIDENCE_CHARS", "20000"))
 
 
 settings = Settings()

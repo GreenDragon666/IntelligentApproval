@@ -1,52 +1,46 @@
-"""步骤三编写期入口：对一条规则跑 LangGraph 流水线，由本地模型生成 checker。
-
-需你先手动起本地 vLLM（仓库不自动启动）：
-    bash scripts/serve_llm_3b.sh
-
-用法：
-    python gen_checker.py --rule rules/rule_4.md --rule-id rule_4 \\
-        --test tests/acceptance/rule_4_accept.py
-若不传 --test，使用内置的最小验收测试（仅校验可导入并返回 RuleResult）。
-"""
+"""针对案件 JSON 中的一条规则生成或更新全局 checker。"""
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
+from src.checker_store import CheckerStore, checker_key
 from src.codegen.graph import generate_checker
-
-# 最小验收测试：验证生成模块可导入、check 可调用、返回 RuleResult。
-# 真实使用应替换为带正/负样例断言的验收测试（放 tests/acceptance/）。
-DEFAULT_TEST = '''\
-import candidate  # 触发 @register
-from src.schema import TenderContext, RuleResult
-from src.registry import all_checkers
-fns = all_checkers()
-assert fns, "未注册任何 checker"
-rid = list(fns)[-1]
-r = fns[rid](TenderContext(full_text="测试", sections={"项目概况": "测试"}))
-assert isinstance(r, RuleResult), f"返回类型错误: {type(r)}"
-print("acceptance ok:", rid, r.status)
-'''
+from src.schema import MatchedCase
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--rule", required=True, help="规则 Markdown 路径")
-    ap.add_argument("--rule-id", required=True)
-    ap.add_argument("--test", help="验收测试 .py（子进程执行，退出码0为通过）")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(description="生成单条招标审批 checker")
+    parser.add_argument("--input", required=True, help="rules_matched.json 路径")
+    parser.add_argument("--rule-id", required=True, type=int, help="规则序号")
+    parser.add_argument("--checker-dir", help="全局 checker 缓存目录")
+    parser.add_argument("--feedback", default="", help="人工或复核反馈")
+    parser.add_argument("--force", action="store_true", help="已有缓存时仍重新生成")
+    args = parser.parse_args()
 
-    rule_text = Path(args.rule).read_text(encoding="utf-8")
-    test_code = Path(args.test).read_text(encoding="utf-8") if args.test else DEFAULT_TEST
+    case = MatchedCase.from_json_file(args.input)
+    rule = case.get_rule(args.rule_id)
+    store = CheckerStore(args.checker_dir)
+    existing_code = store.load(rule) if store.exists(rule) else ""
+    if existing_code and not args.force:
+        print(f"已存在可复用 checker: {store.code_path(rule)}")
+        return
 
-    state = generate_checker(args.rule_id, rule_text, test_code)
+    state = generate_checker(
+        rule,
+        feedback=args.feedback,
+        store_root=str(store.root),
+        previous_code=existing_code,
+    )
     if state.get("success"):
-        print(f"✅ 生成成功（{state['attempts']} 次尝试）→ generated_checkers/{args.rule_id}.py")
-        print("请人工 review 后并入 src/checkers/。")
+        print(
+            f"生成成功: {checker_key(rule)}，尝试 {state.get('attempts', 0)} 次，"
+            f"路径 {state.get('checker_path')}"
+        )
     else:
-        print(f"❌ {state['attempts']} 次尝试后仍未通过验收测试。最后错误：\n{state.get('error')}")
+        raise SystemExit(
+            f"生成失败，尝试 {state.get('attempts', 0)} 次：{state.get('error', '')}"
+        )
 
 
 if __name__ == "__main__":

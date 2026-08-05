@@ -1,42 +1,60 @@
-"""步骤三运行时入口：对「已准备好的规则输入 JSON」跑合规校验并出报告。
-
-本入口不读 PDF、不做目录/关键词抽取。输入须符合 TenderContext 契约
-（见 data/inputs/ 样例 与 docs/ARCHITECTURE.md）。
-
-用法：
-    python main.py --input data/inputs/sample_tender.json --out reports/
-    python main.py --input data/inputs/sample_tender.json --rules rule_2 rule_4
-"""
+"""案件级入口：读取 rules_matched.json，生成/复用 checker 并输出报告。"""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from src import report as report_mod
-from src.engine import run
-from src.schema import TenderContext
+from src.engine import run_case
+from src.report import to_json, to_markdown
+from src.schema import MatchedCase
+
+
+def _default_output(input_path: Path) -> Path:
+    if input_path.parent.name == "matched":
+        return input_path.parent.parent / "results"
+    return input_path.parent / "results"
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="招标文件智能审批 · 步骤三代码校验")
-    ap.add_argument("--input", required=True, help="结构化输入 JSON（TenderContext）")
-    ap.add_argument("--rules", nargs="*", help="只跑指定规则 id，如 rule_2 rule_4")
-    ap.add_argument("--out", default="reports", help="报告输出目录")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(description="招标文件智能合规审批")
+    parser.add_argument("--input", required=True, help="rules_matched.json 路径")
+    parser.add_argument("--rules", nargs="*", type=int, help="只执行指定规则序号")
+    parser.add_argument("--out", help="输出目录；默认在案件目录的 results/")
+    parser.add_argument(
+        "--no-generate",
+        action="store_true",
+        help="缺少 checker 时不调用本地模型，适合无模型环境",
+    )
+    parser.add_argument("--force-regenerate", action="store_true", help="忽略缓存重新生成")
+    parser.add_argument("--review", action="store_true", help="用本地 LLM 复核结果并反馈迭代")
+    parser.add_argument("--checker-dir", help="全局 checker 缓存目录")
+    args = parser.parse_args()
+    if args.no_generate and args.force_regenerate:
+        parser.error("--no-generate 与 --force-regenerate 不能同时使用")
 
-    ctx = TenderContext.from_json_file(args.input)
-    doc_name = ctx.doc_name or Path(args.input).stem
-    rep = run(ctx, doc_name=doc_name, rule_ids=args.rules)
+    input_path = Path(args.input)
+    case = MatchedCase.from_json_file(input_path)
+    report = run_case(
+        case,
+        rule_ids=args.rules,
+        generate_missing=not args.no_generate,
+        force_regenerate=args.force_regenerate,
+        llm_review=args.review,
+        checker_dir=args.checker_dir,
+    )
 
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    stem = Path(args.input).stem
-    (out / f"{stem}.json").write_text(report_mod.to_json(rep), encoding="utf-8")
-    (out / f"{stem}.md").write_text(report_mod.to_markdown(rep), encoding="utf-8")
-
-    print(f"总体结论: {rep.overall.value} | 违规 {len(rep.violations)} 预警 {len(rep.warnings)}")
-    print(f"报告已写入: {out}/{stem}.json, {out}/{stem}.md")
+    output = Path(args.out) if args.out else _default_output(input_path)
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "summary.json").write_text(to_json(report) + "\n", encoding="utf-8")
+    (output / "summary.md").write_text(to_markdown(report, case), encoding="utf-8")
+    counts = report.to_dict()["summary"]
+    print(
+        f"总体结论: {report.overall} | 违规 {counts['violation']} "
+        f"预警 {counts['warning']} 执行失败 {counts['error']} "
+        f"流程错误 {counts['pipeline_error']}"
+    )
+    print(f"报告已写入: {output / 'summary.json'}, {output / 'summary.md'}")
 
 
 if __name__ == "__main__":

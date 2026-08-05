@@ -1,101 +1,96 @@
-# 架构说明：步骤三「代码校验」
+# 架构说明
 
-## 1. 边界
+## 1. 模块
 
-| 在步骤三内（`src/`） | 不在步骤三内 |
+| 路径 | 职责 |
 |---|---|
-| 输入契约、checker 生成与注册、确定性执行、报告 | PDF 抽取、目录拆分、关键词匹配 |
-| 本地模型客户端（编写期） | 自动启动模型服务 |
+| `src/schema.py` | 正式案件输入、checker 输出、运行记录和汇总报告契约 |
+| `src/checker_store.py` | 根据规则哈希保存、发现和复用全局 checker |
+| `src/codegen/` | LangGraph 生成、契约验证、错误反馈和重试 |
+| `src/engine.py` | 案件级编排：生成/复用、执行、复核、定向迭代 |
+| `src/reviewer.py` | 可选的本地 LLM 结果复核 |
+| `src/report.py` | JSON 和 Markdown 报告 |
+| `src/llm.py` | 本地 vLLM 客户端 |
+| `main.py` | 完整案件入口 |
+| `gen_checker.py` | 单条规则 checker 生成入口 |
 
-输入由**你按规则准备**（或上游步骤一/二产出），形态为 `TenderContext` JSON，放入 `data/inputs/`。
+## 2. 输入
 
----
-
-## 2. 两阶段
-
+```text
+MatchedCase
+├── case_id
+├── source
+│   └── file
+└── rules[]
+    ├── rule_id: int
+    ├── rule_raw
+    ├── rule_text
+    └── evidence[]
+        ├── location
+        │   ├── file
+        │   ├── section
+        │   ├── pdf_pages
+        │   └── document_pages
+        └── text
 ```
-编写期（要本地模型，偶尔跑）
-  rules/*.md + acceptance test
-       → LangGraph: generate → validate →(fail retry)→ save
-       → generated_checkers/*.py → 人工 review → src/checkers/
 
-运行时（每份文件，默认不调代码生成模型）
-  data/inputs/*.json (TenderContext)
-       → engine.run(checkers)
-       → reports/*.json + *.md
+`source` 只保留 `file`。详细示例见 `docs/MATCHED_JSON.md`。
+
+## 3. Checker 复用
+
+规范化 `rule_text` 后计算 SHA-256：
+
+```text
+rule_<rule_id>_<digest前12位>.py
 ```
 
-**当前状态（已清模拟数据）：**
-- `src/checkers/` 为空，无手写试点 checker。
-- `data/inputs/` 为空，无样例 JSON。
-- 编写期流水线骨架在 `src/codegen/` + `gen_checker.py`；默认 3B；**服务需你手动起**。
+生成 checker 时只向模型提供 `rule_id`、`rule_raw` 和 `rule_text`，不提供案件
+evidence。生成函数固定为：
 
----
+```python
+def check(rule: MatchedRule) -> RuleResult:
+    ...
+```
 
-## 3. `src/` 文件职责
+运行时传入当前案件的 `MatchedRule`。这样规则稳定时可以跨案件复用，规则内容变化时
+会自动切换到新的哈希版本。
 
-| 文件 | 职责 |
+## 4. 执行与反馈
+
+```text
+读取 MatchedCase
+  → evidence 为空：insufficient_input
+  → 查找 checker
+      ├── 已存在：复用
+      └── 不存在：本地模型生成
+  → 临时目录子进程执行
+  → 校验 RuleResult 契约、rule_id、证据下标和原文引用
+  → 可选 LLM 复核
+      ├── 通过：进入汇总
+      └── 不通过：反馈 → 只重新生成当前规则 → 再执行/复核
+```
+
+代码异常也会作为反馈触发一次定向重新生成。所有规则互相隔离，单条失败不终止整个案件。
+
+## 5. 结果状态
+
+| 状态 | 含义 |
 |---|---|
-| `schema.py` | `TenderContext` / `RuleResult` / `Status` / `Evidence`；JSON 读写 |
-| `registry.py` | `@register(rule_id)` |
-| `engine.py` | 逐规则执行 → `ApprovalReport`（无 checker 时结果为空） |
-| `report.py` | JSON / Markdown |
-| `llm.py` | `chat()` / `healthcheck()` → 本地 vLLM |
-| `codegen/*` | generate → validate → save，失败带错误重试 |
-| `checkers/` | 落库 checker 目录（当前仅空 `__init__.py`） |
+| `violation` | 规则判定违规 |
+| `warning` | 需要人工关注 |
+| `pass` | 规则判定通过 |
+| `insufficient_input` | 没有原文或规则所需信息不足 |
+| `error` | checker 缺失、生成失败或执行失败 |
 
-根目录：`main.py`（运行时）、`gen_checker.py`（编写期）、`config.py`、`scripts/serve_llm_*.sh`。
+案件总体状态为 `violation`、`warning`、`pass` 或 `partial`。
 
----
+## 6. 无模型模式
 
-## 4. 本地模型（3B 已配置，不自动跑）
+`main.py --no-generate` 不会访问本地模型。已有 checker 仍会执行；缺少 checker 的规则
+记录为 `error`，空 evidence 记录为 `insufficient_input`。该模式用于本机框架检查和服务器
+模型服务不可用时的降级诊断。
 
-| 项 | 值 |
-|---|---|
-| 权重 | `/home/zyl/public/LLM Library/Qwen2.5-Coder-3B-Instruct` |
-| served name | `Qwen2.5-Coder-3B-Instruct` |
-| base_url | `http://localhost:8000/v1` |
-| 启动 | `bash scripts/serve_llm_3b.sh` |
+## 7. 安全
 
-14B：`/home/zyl/public/LLM Library/Qwen2.5-Coder-14B-Instruct`，`scripts/serve_llm_14b.sh`。
-
----
-
-## 5. 输入 JSON 契约（你来准备）
-
-```json
-{
-  "doc_name": "可选",
-  "full_text": "可选，全文",
-  "sections": { "项目概况": "..." },
-  "fields": {
-    "project_type": "信息系统/软件开发",
-    "warranty_months": 12,
-    "registered_capital_req": 50000000,
-    "project_actual_capital_need": 20000000
-  },
-  "tables": {},
-  "references": {}
-}
-```
-
-字段以各规则 `【开发说明】→输入数据` 为准；缺字段 → 该规则 `NA`。
-
----
-
-## 6. 测试
-
-验收测试、回归测试均由后续按规则自备，放入 `tests/`（如 `tests/acceptance/rule_N_accept.py`）。  
-不再保留 PDF 抽取辅助与手写 checker 单测。
-
----
-
-## 7. 代码生成 loop
-
-```
-generate → validate(acceptance) ──pass──→ save
-              │
-              └── fail & attempts < N ──→ generate(prev_code + error)
-```
-
-N 默认 3（`CODEGEN_MAX_RETRIES`）。
+生成代码在临时目录的限时子进程中运行，并校验输出契约。进程级隔离不是完整安全沙箱，
+生产部署应进一步使用禁网、只读文件系统、资源限额和非特权用户的容器。

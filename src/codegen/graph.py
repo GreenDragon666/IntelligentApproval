@@ -1,53 +1,77 @@
-"""步骤三编写期：LangGraph 代码生成流水线。
-
-图结构：
-    generate ──> validate ──(pass)──> save ──> END
-                    │
-                    └──(fail & 还有重试次数)──> generate（带错误反馈）
-
-需本机已手动启动 vLLM（scripts/serve_llm_3b.sh）。langgraph/openai 懒加载。
-"""
+"""本地模型 checker 生成、契约验证、失败重试和落库。"""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from config import settings
 from .. import llm
+from ..checker_store import CheckerStore, checker_key
+from ..schema import MatchedRule
 from . import prompts
-from .sandbox import extract_code, run_checker_test
+from .sandbox import extract_code, validate_checker
 
 
 class CodegenState(TypedDict, total=False):
-    rule_id: str
-    rule_text: str
-    test_code: str        # 该规则的验收测试（人工提供，作为生成正确性的锚点）
+    rule: dict[str, Any]
+    feedback: str
     code: str
     error: str
     attempts: int
     success: bool
+    checker_key: str
+    checker_path: str
+    store_root: str
+
+
+def _state_rule(state: CodegenState) -> MatchedRule:
+    return MatchedRule.from_dict(state["rule"])
 
 
 def _node_generate(state: CodegenState) -> CodegenState:
-    if state.get("attempts", 0) == 0:
-        prompt = prompts.build_generate_prompt(state["rule_id"], state["rule_text"])
+    rule = _state_rule(state)
+    attempts = state.get("attempts", 0)
+    if attempts == 0 and state.get("code"):
+        prompt = prompts.build_retry_prompt(
+            rule.rule_id,
+            rule.rule_raw,
+            rule.rule_text,
+            state["code"],
+            state.get("feedback", "要求重新生成 checker"),
+            state.get("feedback", ""),
+        )
+    elif attempts == 0:
+        prompt = prompts.build_generate_prompt(
+            rule.rule_id, rule.rule_raw, rule.rule_text, state.get("feedback", "")
+        )
     else:
-        prompt = prompts.build_retry_prompt(state["rule_id"], state.get("code", ""), state.get("error", ""))
+        prompt = prompts.build_retry_prompt(
+            rule.rule_id,
+            rule.rule_raw,
+            rule.rule_text,
+            state.get("code", ""),
+            state.get("error", ""),
+            state.get("feedback", ""),
+        )
     raw = llm.chat(prompt, system=prompts.SYSTEM)
-    return {**state, "code": extract_code(raw), "attempts": state.get("attempts", 0) + 1}
+    return {**state, "code": extract_code(raw), "attempts": attempts + 1}
 
 
 def _node_validate(state: CodegenState) -> CodegenState:
-    ok, output = run_checker_test(state["code"], state["test_code"])
-    return {**state, "success": ok, "error": "" if ok else output}
+    ok, error = validate_checker(state.get("code", ""), _state_rule(state))
+    return {**state, "success": ok, "error": "" if ok else error}
 
 
 def _node_save(state: CodegenState) -> CodegenState:
-    out_dir = Path(settings.generated_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{state['rule_id']}.py").write_text(state["code"], encoding="utf-8")
-    return state
+    rule = _state_rule(state)
+    code_path, _ = CheckerStore(state.get("store_root") or None).save(
+        rule, state["code"], attempts=state.get("attempts", 0)
+    )
+    return {
+        **state,
+        "checker_key": checker_key(rule),
+        "checker_path": str(code_path),
+    }
 
 
 def _route(state: CodegenState) -> str:
@@ -59,22 +83,35 @@ def _route(state: CodegenState) -> str:
 
 
 def build_graph():
-    from langgraph.graph import StateGraph, END
+    from langgraph.graph import END, StateGraph
 
-    g = StateGraph(CodegenState)
-    g.add_node("generate", _node_generate)
-    g.add_node("validate", _node_validate)
-    g.add_node("save", _node_save)
-    g.set_entry_point("generate")
-    g.add_edge("generate", "validate")
-    g.add_conditional_edges("validate", _route,
-                            {"generate": "generate", "save": "save", "give_up": END})
-    g.add_edge("save", END)
-    return g.compile()
+    graph = StateGraph(CodegenState)
+    graph.add_node("generate", _node_generate)
+    graph.add_node("validate", _node_validate)
+    graph.add_node("save", _node_save)
+    graph.set_entry_point("generate")
+    graph.add_edge("generate", "validate")
+    graph.add_conditional_edges(
+        "validate",
+        _route,
+        {"generate": "generate", "save": "save", "give_up": END},
+    )
+    graph.add_edge("save", END)
+    return graph.compile()
 
 
-def generate_checker(rule_id: str, rule_text: str, test_code: str) -> CodegenState:
-    """跑完整流水线，返回最终状态（含 success / code / error）。"""
-    graph = build_graph()
-    return graph.invoke({"rule_id": rule_id, "rule_text": rule_text,
-                         "test_code": test_code, "attempts": 0})
+def generate_checker(
+    rule: MatchedRule,
+    feedback: str = "",
+    store_root: str | None = None,
+    previous_code: str = "",
+) -> CodegenState:
+    return build_graph().invoke(
+        {
+            "rule": rule.to_dict(),
+            "feedback": feedback,
+            "code": previous_code,
+            "attempts": 0,
+            "store_root": store_root or "",
+        }
+    )
