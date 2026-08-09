@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from config import settings
-from ..schema import MatchedRule, RuleResult
+from ..rule_schema import MatchedRule, RuleResult
 
 _CODE_BLOCK = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
 

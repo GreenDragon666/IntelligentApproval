@@ -7,7 +7,7 @@ from pathlib import Path
 
 from src.engine import run_case
 from src.report import to_json, to_markdown
-from src.schema import MatchedCase
+from src.rule_schema import MatchedCase
 
 
 def _default_output(input_path: Path) -> Path:

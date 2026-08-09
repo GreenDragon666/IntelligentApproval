@@ -26,6 +26,14 @@ class Settings:
     llm_model_path: str = os.getenv("LOCAL_LLM_MODEL_PATH", _DEFAULT_MODEL_DIR)
     llm_api_key: str = os.getenv("LOCAL_LLM_API_KEY", "EMPTY")
 
+    # —— 步骤一、二的本地语义匹配模型（默认与代码模型使用不同端口）——
+    stage12_llm_base_url: str = os.getenv(
+        "STAGE12_LLM_BASE_URL", "http://localhost:8001/v1"
+    )
+    stage12_llm_model: str = os.getenv("STAGE12_LLM_MODEL", "Qwen3-7B")
+    stage12_llm_api_key: str = os.getenv("STAGE12_LLM_API_KEY", "EMPTY")
+    stage12_candidate_chars: int = int(os.getenv("STAGE12_CANDIDATE_CHARS", "1200"))
+
     # —— 语义相似度 embedding（步骤三可选；当前确定性 checker 不强制）——
     embed_model: str = os.getenv("LOCAL_EMBED_MODEL", "BAAI/bge-m3")
 

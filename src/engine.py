@@ -9,7 +9,7 @@ from .checker_store import CheckerStore, checker_key
 from .codegen.graph import generate_checker
 from .codegen.sandbox import run_checker
 from .reviewer import review as review_result
-from .schema import ApprovalReport, MatchedCase, MatchedRule, RuleResult, RuleRun, Status
+from .rule_schema import ApprovalReport, MatchedCase, MatchedRule, RuleResult, RuleRun, Status
 
 
 def _failure(rule: MatchedRule, summary: str) -> RuleResult:

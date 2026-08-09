@@ -5,6 +5,9 @@ langgraph>=0.2
 openai>=1.40              # 对接本地 vLLM 的 OpenAI 兼容接口，不出网
 # vllm                    # 起本地服务时安装：pip install vllm（体积大，按需）
 
+# —— 步骤一、二 PDF 文本/书签抽取（没有时可降级使用系统 pdftotext）——
+PyMuPDF>=1.24
+
 # —— 可选：生成 checker 内部需要语义相似度时另行提供确定性本地能力 ——
 # sentence-transformers>=3.0
 

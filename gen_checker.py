@@ -6,7 +6,7 @@ import argparse
 
 from src.checker_store import CheckerStore, checker_key
 from src.codegen.graph import generate_checker
-from src.schema import MatchedCase
+from src.rule_schema import MatchedCase
 
 
 def main() -> None:

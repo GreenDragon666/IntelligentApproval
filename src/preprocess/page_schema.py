@@ -1,0 +1,62 @@
+"""步骤一、二内部数据结构；正式输出仍使用 ``src.schema``。"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+
+
+@dataclass(frozen=True)
+class PageText:
+    """PDF 单页文本，同时保存物理页和可选正文印刷页。"""
+    pdf_page: int
+    document_page: int | None
+    text: str
+
+    def to_dict(self) -> dict:
+        """转换为可写入调试 JSON 的普通字典。"""
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class DocumentSection:
+    """用于规则匹配的连续 PDF 章节块及其双页码范围。"""
+    title: str
+    pdf_start: int
+    pdf_end: int
+    document_start: int | None
+    document_end: int | None
+    text: str
+
+    def to_dict(self) -> dict:
+        """转换为可写入 ``sections.json`` 的普通字典。"""
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class PolicyRule:
+    """从政策 JSON/XLSX 读取的规则及只用于召回的提示字段。"""
+    rule_id: int
+    rule_raw: str
+    rule_text: str
+    match_hints: list[str] = field(default_factory=list)
+
+    @property
+    def query_text(self) -> str:
+        """返回供检索使用的规则原文、提示和完整逻辑拼接文本。"""
+        return "\n".join([self.rule_raw, *self.match_hints, self.rule_text])
+
+
+@dataclass(frozen=True)
+class SectionCandidate:
+    """一条政策规则召回的招标章节及其字符级相关分数。"""
+    section: DocumentSection
+    score: float
+
+    def to_dict(self) -> dict:
+        """输出候选定位和舍入后的分数，不重复写完整章节原文。"""
+        return {
+            "title": self.section.title,
+            "pdf_start": self.section.pdf_start,
+            "pdf_end": self.section.pdf_end,
+            "score": round(self.score, 6),
+        }

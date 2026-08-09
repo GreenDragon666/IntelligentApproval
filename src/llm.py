@@ -15,17 +15,29 @@ from __future__ import annotations
 from config import settings
 
 
-def chat(prompt: str, system: str = "", temperature: float = 0.1, max_tokens: int = 4096) -> str:
+def chat(
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.1,
+    max_tokens: int = 4096,
+    *,
+    base_url: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+) -> str:
     """调用本地代码生成模型，返回文本。openai 包懒加载。"""
     from openai import OpenAI
 
-    client = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+    client = OpenAI(
+        base_url=base_url or settings.llm_base_url,
+        api_key=api_key or settings.llm_api_key,
+    )
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     resp = client.chat.completions.create(
-        model=settings.llm_model,
+        model=model or settings.llm_model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,

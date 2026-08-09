@@ -8,7 +8,7 @@ from pathlib import Path
 
 from src.checker_store import checker_key
 from src.engine import run_case
-from src.schema import MatchedCase, Status
+from src.rule_schema import MatchedCase, Status
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
