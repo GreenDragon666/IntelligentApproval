@@ -50,7 +50,7 @@ def select_candidates(
                 "index": index,
                 "title": candidate.section.title,
                 "pdf_pages": [candidate.section.pdf_start, candidate.section.pdf_end],
-                "text": candidate.section.text[:settings.stage12_candidate_chars],
+                "text": candidate.section.text[:settings.llm_candidate_chars],
                 "lexical_score": round(candidate.score, 6),
             }
             for index, candidate in enumerate(candidates)
@@ -71,9 +71,9 @@ def select_candidates(
         system="你是招标文件章节匹配专家，只基于给定规则和候选原文作答。",
         temperature=0.0,
         max_tokens=512,
-        base_url=settings.stage12_llm_base_url,
-        model=settings.stage12_llm_model,
-        api_key=settings.stage12_llm_api_key,
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
     )
     data = _parse_json_object(raw)
     indices = data.get("selected_indices")

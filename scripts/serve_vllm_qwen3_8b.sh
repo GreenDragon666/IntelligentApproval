@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # 启动步骤一、二使用的本地 Qwen3-7B（vLLM，OpenAI 兼容）。
 # 必须显式提供服务器上的权重目录：
-#   export STAGE12_LLM_MODEL_PATH=/path/to/Qwen3-7B
-#   bash scripts/serve_stage12_qwen3_7b.sh
+#   export LLM_MODEL_PATH=/path/to/Qwen3-8B
+#   bash scripts/serve_vllm_qwen3_8b.sh
 
 set -euo pipefail
 
-MODEL_PATH="${STAGE12_LLM_MODEL_PATH:?请先设置 STAGE12_LLM_MODEL_PATH 为 Qwen3-7B 权重目录}"
-SERVED_NAME="${STAGE12_LLM_MODEL:-Qwen3-7B}"
-HOST="${STAGE12_LLM_HOST:-127.0.0.1}"
-PORT="${STAGE12_LLM_PORT:-8001}"
-MAX_LEN="${STAGE12_LLM_MAX_MODEL_LEN:-16384}"
-GPU_UTIL="${STAGE12_LLM_GPU_MEM_UTIL:-0.85}"
+export CUDA_VISIBLE_DEVICES=${LLM_CUDA_VISIBLE_DEVICES:-0,1,2,3}
+
+MODEL_PATH="${LLM_MODEL_PATH:?请先设置 LLM_MODEL_PATH 为 Qwen3-8B 权重目录}"
+SERVED_NAME="${LLM_MODEL:-Qwen3-8B}"
+HOST="${LLM_HOST:-127.0.0.1}"
+PORT="${LLM_PORT:-8001}"
+MAX_LEN="${LLM_MAX_MODEL_LEN:-16384}"
+GPU_UTIL="${LLM_GPU_MEM_UTIL:-0.9}"
 EXTRA_ARGS=("$@")
 
 if [[ ! -d "$MODEL_PATH" ]]; then
@@ -28,7 +30,7 @@ else
   exit 1
 fi
 
-echo "Starting stage1+2 vLLM"
+echo "Starting vLLM"
 echo "  model path : $MODEL_PATH"
 echo "  served name: $SERVED_NAME"
 echo "  endpoint   : http://${HOST}:${PORT}/v1"
