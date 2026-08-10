@@ -19,7 +19,8 @@
             "file": "招标文件2.pdf",
             "section": "第一章 招标公告—二、项目概况与招标范围",
             "pdf_pages": {"start": 11, "end": 11},
-            "document_pages": {"start": 3, "end": 3}
+            "document_pages": {"start": 3, "end": 3},
+            "page_basis": "original_pdf"
           },
           "text": "二、项目概况与招标范围……"
         }
@@ -38,6 +39,9 @@
 - `rule_text` 是用于生成 checker 的完整规则，对应“触发逻辑公式”。
 - 一条规则可关联多个文件或章节，因此 `evidence` 固定为数组。
 - 没有匹配到原文时使用 `"evidence": []`，不得填充模拟内容。
-- `pdf_pages` 是 PDF 查看器中的物理页码；`document_pages` 是正文印刷页码。没有正文页码时，`document_pages` 为 `null`。
+- `pdf_pages` 保留原字段名以兼容既有流程，具体口径由 `page_basis` 说明。
+- `page_basis=original_pdf` 表示原始 PDF 物理页，`converted_pdf` 表示 Office 转换后 PDF 页，`logical_page` 表示显式换页形成的逻辑页。
+- `document_pages` 是正文印刷页码。没有正文页码时为 `null`。
+- 旧 JSON 没有 `page_basis` 时按 `original_pdf` 读取。
 
 代码通过 `src.rule_schema.MatchedCase.from_json_file()` 读取并严格校验该结构。

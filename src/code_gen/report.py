@@ -60,10 +60,8 @@ def to_markdown(report: ApprovalReport, case: MatchedCase) -> str:
                         "，文件内页码"
                         + _pages(location.document_pages.start, location.document_pages.end)
                     )
-                lines.append(
-                    f"- **证据**：{location.section}（PDF第{pdf}页{document}）"
-                    f"：「{finding.quote}」"
-                )
+                page_label = {"original_pdf": "PDF", "converted_pdf": "转换PDF", "logical_page": "逻辑页"}[location.page_basis]
+                lines.append(f"- **证据**：{location.section}（{page_label}第{pdf}页{document}）：「{finding.quote}」")
                 if finding.reason:
                     lines.append(f"  - {finding.reason}")
         if run.checker_key:

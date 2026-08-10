@@ -4,7 +4,7 @@
 
 | 步骤 | 目录 | 输入 | 输出 |
 |---|---|---|---|
-| 一：目录提取 | `src/dir_extr/` | 招标 PDF、正文页码偏移 | `PageText`、目录书签、`DocumentSection` |
+| 一：目录提取 | `src/dir_extr/` | PDF/Office/纯文本、正文页码偏移 | `PageText`、目录、`DocumentSection` |
 | 二：内容匹配 | `src/cont_match/` | 章节、政策规则 JSON/XLSX | 带双页码 evidence 的 `MatchedCase` |
 | 三：代码生成与审批 | `src/code_gen/` | `MatchedCase` | checker、规则执行结果、审批报告 |
 
@@ -13,6 +13,7 @@
 ```text
 src/
 ├── dir_extr/                   # 步骤一
+│   ├── documents.py            # 多格式分派与 Office 转换
 │   ├── pdf.py
 │   └── sections.py
 ├── cont_match/                 # 步骤二
@@ -47,8 +48,8 @@ src/
 `main.py` 是用户统一入口。它不包含提取、匹配或审批算法，只负责选择运行范围和串联编排：
 
 ```text
-main.py --one_report_path <PDF>
-  → 自动创建 reports/report_x 并复制输入 PDF
+main.py --one_report_path <文档>
+  → 自动创建 reports/report_x 并复制输入文档
   → cont_match.pipeline.prepare_case
       → dir_extr
       → cont_match
@@ -63,9 +64,9 @@ main.py --input rules_matched.json
   → code_gen.report
 
 main.py --reports_path <目录>
-  → 递归发现所有 PDF
-  → 每个 PDF 分配独立的 reports/report_x
-  → 对每个 PDF 执行与单文件模式相同的三步流程
+  → 递归发现所有支持文档
+  → 每个文档分配独立的 reports/report_x
+  → 对每个文档执行与单文件模式相同的三步流程
 ```
 
 `prepare_case.py` 是步骤一、二的独立运行/排错入口；`gen_checker.py` 是单条规则的第三步生成/
@@ -76,6 +77,14 @@ main.py --reports_path <目录>
 后续任务覆盖其追溯信息。
 
 ## 3. 步骤一：目录提取
+
+`dir_extr/documents.py` 是格式适配层：
+
+- PDF 直接进入现有提取器；
+- DOCX/DOCM 优先使用 LibreOffice 转 PDF，无转换器时解析 Word XML；
+- DOC/ODT/RTF/WPS 通过 LibreOffice 临时转 PDF；正式运行会保留为 `preprocessing/converted_source.pdf`；
+- TXT/Markdown 直接读取并按换页符形成逻辑页；
+- 输出统一的 `ExtractedDocument`，包含页文本、目录、提取方法和页码口径。
 
 `dir_extr/pdf.py`：
 
@@ -150,12 +159,16 @@ MatchedCase
         │   ├── file
         │   ├── section
         │   ├── pdf_pages
-        │   └── document_pages
+        │   ├── document_pages
+        │   └── page_basis
         └── text
 ```
 
 该契约定义在 `src/rule_schema.py`。步骤二只能通过它输出，步骤三只依赖它消费，因此第三步
 不需要知道 PDF 如何拆分或候选如何召回。
+
+`page_basis` 取值为 `original_pdf`、`converted_pdf` 或 `logical_page`。为保持旧 JSON 兼容，
+缺少该字段时默认按 `original_pdf` 读取。
 
 ## 7. Checker 复用
 

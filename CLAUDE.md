@@ -4,15 +4,15 @@
 
 对招标文件执行完整的智能合规审批：
 
-1. `src/dir_extr/` 提取 PDF 逐页文本、目录和章节；
+1. `src/dir_extr/` 提取 PDF、Office、纯文本的分页文本、目录和章节；
 2. `src/cont_match/` 将政策规则匹配到招标原文并生成正式 JSON；
 3. `src/code_gen/` 生成、复用、执行和复核 checker，输出审批报告。
 
 `main.py` 是三步统一入口；`prepare_case.py` 保留为步骤一、二独立运行/排错入口；已有
 `rules_matched.json` 可以通过 `main.py --input` 单独进入步骤三。
 
-PDF 输入不允许手工指定 `case_id`。`--one_report_path` 处理单个 PDF，`--reports_path` 递归
-处理目录下所有 PDF；每个 PDF 自动分配新的 `reports/report_x/` 并复制原文件。
+文档输入不允许手工指定 `case_id`。`--one_report_path` 处理单个文档，`--reports_path` 递归
+处理目录下所有支持文档；每个文档自动分配新的 `reports/report_x/` 并复制原文件。
 
 ## 硬约束
 
@@ -24,6 +24,8 @@ PDF 输入不允许手工指定 `case_id`。`--one_report_path` 处理单个 PDF
 - 不得用手写业务 checker、模拟业务输入或伪造模型输出冒充真实生成流程。
 - checker 生成时不能写死案件 evidence，必须可跨案件复用。
 - `argparse` 的 `add_argument` 调用保持一行，不主动拆成多行排版。
+- Office 文档优先通过 LibreOffice 临时转 PDF；不得覆盖或改写用户原文件。
+- DOCX 无 LibreOffice 时允许 XML 文本降级，DOC/ODT/RTF/WPS 无转换器时必须明确报错。
 
 ## 模块归属
 

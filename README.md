@@ -2,7 +2,7 @@
 
 本项目把完整流程拆成三个边界清晰的步骤，同时提供一个统一入口：
 
-1. 从招标 PDF 提取逐页文本、目录和章节；
+1. 从 PDF、DOC、DOCX 等招标文档提取逐页文本、目录和章节；
 2. 将政策规则与招标章节匹配，生成约定的 `rules_matched.json`；
 3. 为规则生成并复用 Python checker，执行审批并输出报告。
 
@@ -13,7 +13,8 @@
 
 ```text
 src/
-├── dir_extr/                   # 步骤一：PDF、目录、章节
+├── dir_extr/                   # 步骤一：多格式文档、目录、章节
+│   ├── documents.py            # 格式分派、Office 转 PDF、DOCX 降级
 │   ├── pdf.py
 │   └── sections.py
 ├── cont_match/                 # 步骤二：规则读取、召回、LLM 重排
@@ -51,11 +52,11 @@ scripts/run_batch.py            # 多案件批量完整运行
 ## 2. 完整数据流
 
 ```text
-招标 PDF
+招标文档（PDF/DOC/DOCX/ODT/RTF/WPS/TXT/MD）
   │
   ▼
 步骤一 dir_extr
-  逐页文本 + PDF物理页 + 正文印刷页 + 章节
+  逐页文本 + 页码口径 + 正文印刷页 + 章节
   │
   ▼
 步骤二 cont_match  ◀── 政策规则 JSON/XLSX
@@ -77,8 +78,28 @@ rules_matched.json
 - `rule_id` 是规则整数序号；
 - `rule_raw` 对应政策表“重点排查情形”；
 - `source` 只包含 `file`；
-- `evidence.location` 同时保存 PDF 物理页和正文印刷页；
+- `evidence.location` 同时保存来源页、页码口径和正文印刷页；
 - checker 生成时不向模型提供某个案件的 evidence，确保相同规则可跨案件复用。
+
+### 2.1 支持的招标文件格式
+
+| 格式 | 提取方式 | 页码口径 |
+|---|---|---|
+| PDF | PyMuPDF，失败时降级 pypdf/pdftotext | `original_pdf`，原始 PDF 物理页 |
+| DOCX/DOCM | 优先 LibreOffice 转 PDF；不可用时解析 Word XML | `converted_pdf` 或 `logical_page` |
+| DOC/ODT/RTF/WPS | LibreOffice 临时转 PDF | `converted_pdf` |
+| TXT/Markdown | UTF-8/GB18030 直接读取，换页符切页 | `logical_page` |
+
+服务器处理 Office 文档前建议安装 LibreOffice，并确认以下命令至少一个可用：
+
+```bash
+libreoffice --version
+# 或
+soffice --version
+```
+
+转换只发生在临时目录，`reports/report_x/` 内保留原始输入文件。DOCX 无 LibreOffice 时仍能降级
+提取段落和表格，但只有文档中的显式分页符可以形成可靠逻辑页；旧 `.doc` 等格式没有该降级能力。
 
 ## 3. 启动 Qwen3-8B vLLM
 
@@ -138,7 +159,7 @@ vLLM 启动并通过健康检查后，运行：
 
 ```bash
 python main.py \
-  --one_report_path /incoming/招标文件2.pdf \
+  --one_report_path /incoming/招标文件2.docx \
   --policy-rules /path/to/policy_rules.xlsx \
   --document-page-1-pdf-page 9 \
   --use-llm \
@@ -150,14 +171,15 @@ python main.py \
 需要额外复核 checker 结果时增加 `--review`。
 
 程序不接收 `case_id`。它扫描 `reports/` 中已有的 `report_x`（同时兼容旧式 `reportx`），
-自动创建最大编号加一的目录，并把输入 PDF 复制进去。默认产物结构：
+自动创建最大编号加一的目录，并把输入文档复制进去。默认产物结构：
 
 ```text
 reports/report_2/
-├── 招标文件2.pdf
+├── 招标文件2.docx
 ├── matched/
 │   └── rules_matched.json
 ├── preprocessing/
+│   ├── converted_source.pdf    # Office 文档转换后保留，PDF/TXT 时没有
 │   ├── outline.json
 │   ├── sections.json
 │   ├── matches.json
@@ -171,8 +193,9 @@ generated_checkers/
 └── rule_<rule_id>_<hash>.json
 ```
 
-`--document-page-1-pdf-page 9` 表示 PDF 查看器第 9 页对应正文印刷第 1 页，因此正文页码为
-PDF 页码减 8。输出 evidence 会同时保留两种页码，避免目录印刷页与 PDF 物理页混用。
+`--document-page-1-pdf-page 9` 表示原始 PDF 或 Office 转换后 PDF 的第 9 页对应正文印刷第 1 页，
+因此正文页码为来源页码减 8。`evidence.location.page_basis` 会标记页码是原始 PDF、转换 PDF
+还是逻辑页，避免不同口径混用。
 
 ## 5. 分阶段运行与排错
 
@@ -180,7 +203,7 @@ PDF 页码减 8。输出 evidence 会同时保留两种页码，避免目录印�
 
 ```bash
 python prepare_case.py \
-  --one_report_path /incoming/招标文件2.pdf \
+  --one_report_path /incoming/招标文件2.docx \
   --policy-rules /path/to/policy_rules.xlsx \
   --document-page-1-pdf-page 9 \
   --use-llm \
@@ -191,7 +214,7 @@ python prepare_case.py \
 
 ```bash
 python main.py \
-  --one_report_path /incoming/招标文件2.pdf \
+  --one_report_path /incoming/招标文件2.docx \
   --policy-rules /path/to/policy_rules.xlsx \
   --document-page-1-pdf-page 9 \
   --use-llm \
@@ -246,7 +269,7 @@ python main.py \
 
 ### 5.4 批量运行多个案件
 
-`--reports_path` 会递归查找输入目录中的所有 `.pdf`，其他文件自动跳过。启动 vLLM 后运行：
+`--reports_path` 会递归查找输入目录中所有受支持文档，其他文件自动跳过。启动 vLLM 后运行：
 
 ```bash
 python scripts/run_batch.py \
@@ -280,8 +303,8 @@ python main.py \
   --strict-llm
 ```
 
-每个 PDF 会单独生成新的 `reports/report_x/`。批量脚本调用同一个 `main.py`，因此单文件和批量
-行为保持一致。不要把待解析 PDF 放进自动输出的 `reports/` 目录。
+每个文档会单独生成新的 `reports/report_x/`。批量脚本调用同一个 `main.py`，因此单文件和批量
+行为保持一致。不要把待解析文档放进自动输出的 `reports/` 目录。
 
 ## 6. Checker 缓存、定位和重新生成
 
@@ -340,7 +363,8 @@ python -m unittest discover -s tests -v
 
 ## 9. 当前边界
 
-- 支持带文本层的 PDF；扫描件 OCR 尚未接入，程序不会伪造提取原文；
+- 支持 PDF、常见 Office 文档和纯文本；扫描件 OCR 尚未接入，程序不会伪造提取原文；
+- DOC/ODT/RTF/WPS 依赖系统 LibreOffice；DOCX 无 LibreOffice 时只提供逻辑页降级；
 - 内容匹配是候选定位，不是最终违规判断；
 - 生成代码经过 AST 限制并在临时目录的限时子进程中执行，但这不等同于完整安全沙箱；
 - 生产部署仍建议使用禁网、只读文件系统、资源限额和非特权容器。

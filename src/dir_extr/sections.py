@@ -1,4 +1,4 @@
-"""根据 PDF 书签或招标文件常见标题模式构建章节。"""
+"""根据文档目录或招标文件常见标题模式构建章节。"""
 
 from __future__ import annotations
 
@@ -29,9 +29,7 @@ def _heading_from_page(page: PageText) -> str | None:
 def _make_section(title: str, pages: list[PageText]) -> DocumentSection:
     """把连续页打包成章节，保留双页码并给原文添加物理页标记。"""
     document_pages = [page.document_page for page in pages if page.document_page is not None]
-    text = "\n\n".join(
-        f"[PDF第{page.pdf_page}页]\n{page.text}" for page in pages if page.text
-    )
+    text = "\n\n".join(f"[{page.page_label}第{page.pdf_page}页]\n{page.text}" for page in pages if page.text)
     return DocumentSection(
         title=title,
         pdf_start=pages[0].pdf_page,

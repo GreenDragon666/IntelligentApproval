@@ -1,14 +1,13 @@
 # 步骤一、二代码阅读标注
 
-步骤一、二实现“招标 PDF + 政策规则 → `rules_matched.json`”，不是原医疗规则抽取程序的直接改版。
+步骤一、二实现“招标文档 + 政策规则 → `rules_matched.json`”，不是原医疗规则抽取程序的直接改版。
 
 ## 1. 调用顺序
 
 ```text
 prepare_case.py::main
   → cont_match.pipeline.prepare_case
-      ├─ dir_extr.extract_pdf_pages    # PDF逐页文本 + 双页码
-      ├─ dir_extr.extract_pdf_outline  # 原始书签目录
+      ├─ dir_extr.extract_document     # 多格式适配 + 归一化分页
       ├─ dir_extr.split_sections       # 书签优先，标题规则兜底
       ├─ cont_match.load_policy_rules     # JSON/XLSX政策规则
       ├─ LexicalSectionMatcher               # 字符TF-IDF top-k
@@ -21,13 +20,24 @@ prepare_case.py::main
 
 | 类型 | 作用 | 生命周期 |
 |---|---|---|
-| `PageText` | 一页 PDF 的物理页码、可选正文页码和文本 | PDF 提取 → 章节拆分 |
+| `PageText` | 一页来源/转换/逻辑页的页码、标签和文本 | 文档提取 → 章节拆分 |
 | `DocumentSection` | 一个可匹配章节的标题、双页码范围和原文 | 章节拆分 → 候选召回/正式 evidence |
 | `PolicyRule` | 从政策表读出的整数序号、原文、逻辑和匹配提示 | 规则加载 → 候选召回/正式 rule |
 | `SectionCandidate` | 某规则与某章节及其字符级分数 | 召回 → Qwen 重排/调试产物 |
 | `MatchedCase` | 对外正式 JSON 契约 | 流水线最终输出 |
 
 ## 3. 逐函数说明
+
+### `src/dir_extr/documents.py`
+
+| 函数/类型 | 作用 |
+|---|---|
+| `ExtractedDocument` | 统一返回分页文本、目录、源格式、提取方法和页码口径 |
+| `is_supported_document` | 判断文件是否属于 PDF、Office 或纯文本支持范围 |
+| `_convert_office_to_pdf` | 使用独立 LibreOffice profile 临时转换 Office 文档，避免污染源文件 |
+| `_extract_docx_xml` | LibreOffice 不可用时，从 DOCX XML 抽取段落、表格和显式分页符 |
+| `_read_text` | 按 UTF-8/GB18030 读取 TXT、Markdown |
+| `extract_document` | 格式分派总入口，归一为 `PageText`，并可保存转换 PDF 供页码复核 |
 
 ### `src/dir_extr/pdf.py`
 
@@ -45,7 +55,7 @@ prepare_case.py::main
 | 函数 | 作用 | 说明 |
 |---|---|---|
 | `_heading_from_page` | 在每页前30个非空行中寻找通用中文章节标题 | 无义齿、医疗、具体招标行业词表 |
-| `_make_section` | 将连续页组合成章节，计算双页码范围并插入 `[PDF第N页]` 标记 | 保证 evidence 可追溯到物理页 |
+| `_make_section` | 将连续页组合成章节，计算双页码范围并插入带页码口径的标记 | 区分原始 PDF、转换 PDF 和逻辑页 |
 | `_split_long` | 把过长章节按最大页数切块 | 防止检索和模型上下文被超长章节占满 |
 | `_from_outline` | 按 PDF 书签起始页构造章节，同页多书签只保留一个切分点 | 书签优先路径 |
 | `_heuristic` | 无书签时，根据每页检测到的标题形成连续章节 | 通用兜底路径 |
@@ -112,11 +122,11 @@ prepare_case.py::main
 | 函数 | 作用 |
 |---|---|
 | `_allocate_report_dir` | 扫描 `report_x`/旧式 `reportx`，原子创建最大编号加一的目录 |
-| `_discover_pdfs` | 递归发现 `--reports_path` 下的 PDF，并排除自动输出目录 |
-| `_process_pdf` | 复制输入 PDF、运行步骤一二，并按参数继续执行步骤三 |
+| `_discover_documents` | 递归发现 `--reports_path` 下所有支持文档，并排除自动输出目录 |
+| `_process_document` | 复制输入文档、运行步骤一二，并按参数继续执行步骤三 |
 | `_write_report` | 调用审批引擎并写 `summary.json`、`summary.md` |
 | `_validate_args` | 校验三种输入模式和模型/生成参数组合 |
-| `main` | 处理已有 JSON、单个 PDF 或目录中的全部 PDF |
+| `main` | 处理已有 JSON、单个文档或目录中的全部支持文档 |
 
 ## 4. 明确没有复用的部分
 

@@ -1,4 +1,4 @@
-"""步骤二生产入口：调用目录提取、执行规则匹配并输出正式 JSON。"""
+"""步骤二生产入口：调用多格式文档提取、执行规则匹配并输出正式 JSON。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from ..rule_schema import (
     PageRange,
     SourceDocument,
 )
-from ..dir_extr import extract_pdf_outline, extract_pdf_pages, split_sections
+from ..dir_extr import extract_document, split_sections
 from ..page_schema import DocumentSection, SectionCandidate
 from .llm_matcher import select_candidates
 from .retrieval import LexicalSectionMatcher
@@ -30,7 +30,7 @@ def _write_json(path: Path, data: Any) -> None:
     )
 
 
-def _to_evidence(section: DocumentSection, source_file: str) -> MatchedEvidence:
+def _to_evidence(section: DocumentSection, source_file: str, page_basis: str) -> MatchedEvidence:
     """把内部章节转换为正式 evidence，映射文件名和双页码。"""
     document_pages = None
     if section.document_start is not None and section.document_end is not None:
@@ -41,6 +41,7 @@ def _to_evidence(section: DocumentSection, source_file: str) -> MatchedEvidence:
             section=section.title,
             pdf_pages=PageRange(section.pdf_start, section.pdf_end),
             document_pages=document_pages,
+            page_basis=page_basis,
         ),
         text=section.text,
     )
@@ -63,7 +64,7 @@ def _lexical_selection(
 def prepare_case(
     *,
     case_id: str,
-    pdf_path: str | Path,
+    report_path: str | Path,
     rules_path: str | Path,
     output_path: str | Path,
     artifacts_dir: str | Path | None = None,
@@ -91,23 +92,23 @@ def prepare_case(
     if minimum_score < 0:
         raise ValueError("minimum_score 不得小于 0")
 
-    pdf = Path(pdf_path)
+    report = Path(report_path)
     output = Path(output_path)
-    source_file = pdf.name
-    pages = extract_pdf_pages(
-        pdf,
-        document_page_1_pdf_page=document_page_1_pdf_page,
-    )
+    source_file = report.name
+    artifacts = Path(artifacts_dir) if artifacts_dir is not None else None
+    converted_pdf_path = artifacts / "converted_source.pdf" if artifacts is not None else None
+    extracted = extract_document(report, document_page_1_pdf_page=document_page_1_pdf_page, converted_pdf_output=converted_pdf_path)
+    pages = extracted.pages
     if not any(page.text for page in pages):
-        raise ValueError("PDF 没有可提取文本，可能是扫描件；当前流程尚未配置 OCR")
-    outline = extract_pdf_outline(pdf)
+        raise ValueError("文档没有可提取文本；若为扫描件，当前流程尚未配置 OCR")
+    outline = extracted.outline
     sections = split_sections(
         pages,
         outline=outline,
         max_pages=max_section_pages,
     )
     if not sections:
-        raise ValueError("PDF 未生成可匹配章节")
+        raise ValueError("文档未生成可匹配章节")
 
     policy_rules = load_policy_rules(rules_path)
     matcher = LexicalSectionMatcher(sections)
@@ -145,7 +146,7 @@ def prepare_case(
                 rule_raw=rule.rule_raw,
                 rule_text=rule.rule_text,
                 evidence=[
-                    _to_evidence(candidate.section, source_file)
+                    _to_evidence(candidate.section, source_file, extracted.page_basis)
                     for candidate in selected
                 ],
             )
@@ -168,8 +169,7 @@ def prepare_case(
     )
     _write_json(output, case.to_dict())
 
-    if artifacts_dir is not None:
-        artifacts = Path(artifacts_dir)
+    if artifacts is not None:
         _write_json(
             artifacts / "outline.json",
             [
@@ -184,10 +184,15 @@ def prepare_case(
             {
                 "case_id": case.case_id,
                 "source_file": source_file,
+                "source_format": extracted.source_format,
+                "extraction_method": extracted.extraction_method,
+                "page_basis": extracted.page_basis,
+                "converted_pdf_file": str(converted_pdf_path) if converted_pdf_path is not None and converted_pdf_path.is_file() else None,
                 "rules_file": str(Path(rules_path)),
                 "pdf_page_count": len(pages),
+                "source_page_count": len(pages),
                 "outline_count": len(outline),
-                "section_source": "pdf_outline" if outline else "heading_heuristic",
+                "section_source": "document_outline" if outline else "heading_heuristic",
                 "section_count": len(sections),
                 "rule_count": len(policy_rules),
                 "rules_with_evidence": sum(bool(rule.evidence) for rule in matched_rules),

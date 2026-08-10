@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src.code_gen.report import to_json, to_markdown
 from src.cont_match import prepare_case
+from src.dir_extr import SUPPORTED_DOCUMENT_EXTENSIONS, is_supported_document
 from src.engine import run_case
 from src.rule_schema import MatchedCase
 
@@ -29,19 +30,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="招标文件智能合规审批")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", help="已有 rules_matched.json；跳过步骤一、二")
-    source.add_argument("--one_report_path", help="单个待解析 PDF 路径")
-    source.add_argument("--reports_path", help="批量输入目录；递归处理其中所有 PDF")
+    source.add_argument("--one_report_path", help="单个待解析文档路径")
+    source.add_argument("--reports_path", help="批量输入目录；递归处理其中所有支持的文档")
 
     common = parser.add_argument_group("运行范围")
     common.add_argument("--preprocess-only", action="store_true", help="运行步骤一、二并生成 JSON 后停止")
-    common.add_argument("--continue-on-error", action="store_true", help="批量模式中单个 PDF 失败后继续处理")
+    common.add_argument("--continue-on-error", action="store_true", help="批量模式中单个文档失败后继续处理")
 
     extraction = parser.add_argument_group("步骤一：目录提取")
-    extraction.add_argument("--document-page-1-pdf-page", type=int, help="正文印刷第1页对应的 PDF 物理页")
+    extraction.add_argument("--document-page-1-pdf-page", type=int, help="正文印刷第1页对应的原始/转换 PDF 页")
     extraction.add_argument("--max-section-pages", type=int, default=8)
 
     matching = parser.add_argument_group("步骤二：内容匹配")
-    matching.add_argument("--policy-rules", help="政策规则 JSON/XLSX；处理 PDF 时必填")
+    matching.add_argument("--policy-rules", help="政策规则 JSON/XLSX；处理文档时必填")
     matching.add_argument("--candidate-count", type=int, default=8)
     matching.add_argument("--evidence-count", type=int, default=2)
     matching.add_argument("--minimum-score", type=float, default=0.03)
@@ -77,21 +78,21 @@ def _allocate_report_dir(reports_root: str | Path = "reports") -> Path:
             return report_dir
 
 
-def _discover_pdfs(reports_path: str | Path, reports_root: str | Path = "reports") -> list[Path]:
-    """递归发现输入目录中的 PDF，并排除自动生成的 reports 输出目录。"""
+def _discover_documents(reports_path: str | Path, reports_root: str | Path = "reports") -> list[Path]:
+    """递归发现支持的输入文档，并排除自动生成的 reports 输出目录。"""
     source_root = Path(reports_path).expanduser().resolve()
     if not source_root.is_dir():
         raise ValueError(f"批量输入目录不存在: {source_root}")
     output_root = Path(reports_root).resolve()
-    pdfs = []
+    documents = []
     for path in source_root.rglob("*"):
         resolved = path.resolve()
-        if not path.is_file() or path.suffix.lower() != ".pdf":
+        if not path.is_file() or not is_supported_document(path):
             continue
         if resolved == output_root or output_root in resolved.parents:
             continue
-        pdfs.append(resolved)
-    return sorted(pdfs, key=lambda path: str(path).lower())
+        documents.append(resolved)
+    return sorted(documents, key=lambda path: str(path).lower())
 
 
 def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace) -> None:
@@ -106,20 +107,23 @@ def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace)
     print(f"报告已写入: {output / 'summary.json'}, {output / 'summary.md'}")
 
 
-def _process_pdf(pdf_path: str | Path, args: argparse.Namespace, reports_root: str | Path) -> Path:
-    """为一个输入 PDF 分配 report_x，复制原文件并运行所选流程。"""
-    source_pdf = Path(pdf_path).expanduser().resolve()
-    if not source_pdf.is_file() or source_pdf.suffix.lower() != ".pdf":
-        raise ValueError(f"待解析文件不是有效 PDF: {source_pdf}")
+def _process_document(report_path: str | Path, args: argparse.Namespace, reports_root: str | Path) -> Path:
+    """为一个输入文档分配 report_x，复制原文件并运行所选流程。"""
+    source_document = Path(report_path).expanduser().resolve()
+    if not source_document.is_file():
+        raise ValueError(f"待解析文档不存在: {source_document}")
+    if not is_supported_document(source_document):
+        supported = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
+        raise ValueError(f"不支持的文档格式 {source_document.suffix or '<无扩展名>'}；当前支持: {supported}")
 
     report_dir = _allocate_report_dir(reports_root)
-    staged_pdf = report_dir / source_pdf.name
-    shutil.copy2(source_pdf, staged_pdf)
+    staged_document = report_dir / source_document.name
+    shutil.copy2(source_document, staged_document)
     matched_path = report_dir / "matched" / "rules_matched.json"
     artifacts_dir = report_dir / "preprocessing"
-    print(f"创建案件目录: {report_dir}，输入文件: {source_pdf}")
+    print(f"创建案件目录: {report_dir}，输入文件: {source_document}")
 
-    case = prepare_case(case_id=report_dir.name, pdf_path=staged_pdf, rules_path=args.policy_rules, output_path=matched_path, artifacts_dir=artifacts_dir, document_page_1_pdf_page=args.document_page_1_pdf_page, max_section_pages=args.max_section_pages, candidate_count=args.candidate_count, evidence_count=args.evidence_count, minimum_score=args.minimum_score, use_llm=args.use_llm, strict_llm=args.strict_llm)
+    case = prepare_case(case_id=report_dir.name, report_path=staged_document, rules_path=args.policy_rules, output_path=matched_path, artifacts_dir=artifacts_dir, document_page_1_pdf_page=args.document_page_1_pdf_page, max_section_pages=args.max_section_pages, candidate_count=args.candidate_count, evidence_count=args.evidence_count, minimum_score=args.minimum_score, use_llm=args.use_llm, strict_llm=args.strict_llm)
     evidence_count = sum(len(rule.evidence) for rule in case.rules)
     rules_with_evidence = sum(bool(rule.evidence) for rule in case.rules)
     print(f"步骤一、二完成: {matched_path} | 规则 {len(case.rules)} 匹配到原文 {rules_with_evidence} 证据段 {evidence_count}")
@@ -136,7 +140,7 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     if args.one_report_path and args.continue_on_error:
         parser.error("--continue-on-error 只适用于 --reports_path")
     if (args.one_report_path or args.reports_path) and not args.policy_rules:
-        parser.error("处理 PDF 时必须提供 --policy-rules")
+        parser.error("处理文档时必须提供 --policy-rules")
     if args.strict_llm and not args.use_llm:
         parser.error("--strict-llm 必须与 --use-llm 一起使用")
     if args.no_generate and args.force_regenerate:
@@ -154,24 +158,25 @@ def main(argv: list[str] | None = None, *, reports_root: str | Path = "reports")
         _write_report(MatchedCase.from_json_file(input_path), input_path, args)
         return
     if args.one_report_path:
-        _process_pdf(args.one_report_path, args, reports_root)
+        _process_document(args.one_report_path, args, reports_root)
         return
 
-    pdfs = _discover_pdfs(args.reports_path, reports_root)
-    if not pdfs:
-        parser.error(f"--reports_path 下没有可处理的 PDF: {args.reports_path}")
+    documents = _discover_documents(args.reports_path, reports_root)
+    if not documents:
+        supported = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
+        parser.error(f"--reports_path 下没有可处理文档；当前支持: {supported}")
     failures = []
-    for index, pdf_path in enumerate(pdfs, start=1):
-        print(f"\n[{index}/{len(pdfs)}] 开始处理: {pdf_path}")
+    for index, document_path in enumerate(documents, start=1):
+        print(f"\n[{index}/{len(documents)}] 开始处理: {document_path}")
         try:
-            report_dir = _process_pdf(pdf_path, args, reports_root)
+            report_dir = _process_document(document_path, args, reports_root)
         except Exception as exc:
-            failures.append((pdf_path, exc))
-            print(f"[{index}/{len(pdfs)}] 处理失败: {pdf_path}: {exc}", file=sys.stderr)
+            failures.append((document_path, exc))
+            print(f"[{index}/{len(documents)}] 处理失败: {document_path}: {exc}", file=sys.stderr)
             if not args.continue_on_error:
                 raise
         else:
-            print(f"[{index}/{len(pdfs)}] 处理完成: {report_dir}")
+            print(f"[{index}/{len(documents)}] 处理完成: {report_dir}")
     if failures:
         details = "\n".join(f"- {path}: {exc}" for path, exc in failures)
         raise SystemExit(f"批量处理存在 {len(failures)} 个失败文件:\n{details}")

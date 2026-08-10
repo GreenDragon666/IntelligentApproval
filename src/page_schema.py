@@ -7,10 +7,11 @@ from dataclasses import asdict, dataclass, field
 
 @dataclass(frozen=True)
 class PageText:
-    """PDF 单页文本，同时保存物理页和可选正文印刷页。"""
+    """归一化单页文本，同时保存来源页和可选正文印刷页。"""
     pdf_page: int
     document_page: int | None
     text: str
+    page_label: str = "PDF"
 
     def to_dict(self) -> dict:
         """转换为可写入调试 JSON 的普通字典。"""

@@ -39,12 +39,15 @@ class EvidenceLocation:
     section: str
     pdf_pages: PageRange
     document_pages: PageRange | None = None
+    page_basis: str = "original_pdf"
 
     def __post_init__(self) -> None:
         if not self.file.strip():
             raise ValueError("证据文件名不能为空")
         if not self.section.strip():
             raise ValueError("证据章节不能为空")
+        if self.page_basis not in {"original_pdf", "converted_pdf", "logical_page"}:
+            raise ValueError(f"不支持的 page_basis: {self.page_basis}")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvidenceLocation":
@@ -56,6 +59,7 @@ class EvidenceLocation:
             document_pages=(
                 PageRange.from_dict(document_pages) if document_pages is not None else None
             ),
+            page_basis=str(data.get("page_basis", "original_pdf")).strip(),
         )
 
 

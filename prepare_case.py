@@ -11,17 +11,17 @@ from main import main as run_main
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="只运行目录提取和内容匹配")
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--one_report_path", help="单个待解析 PDF 路径")
-    source.add_argument("--reports_path", help="批量输入目录；递归处理其中所有 PDF")
+    source.add_argument("--one_report_path", help="单个待解析文档路径")
+    source.add_argument("--reports_path", help="批量输入目录；递归处理其中所有支持的文档")
     parser.add_argument("--policy-rules", required=True, help="政策规则 JSON/XLSX")
-    parser.add_argument("--document-page-1-pdf-page", type=int, help="正文印刷第1页对应的 PDF 物理页")
+    parser.add_argument("--document-page-1-pdf-page", type=int, help="正文印刷第1页对应的原始/转换 PDF 页")
     parser.add_argument("--max-section-pages", type=int, default=8)
     parser.add_argument("--candidate-count", type=int, default=8)
     parser.add_argument("--evidence-count", type=int, default=2)
     parser.add_argument("--minimum-score", type=float, default=0.03)
     parser.add_argument("--use-llm", action="store_true", help="用服务器本地 Qwen3-8B 重排字符级候选")
     parser.add_argument("--strict-llm", action="store_true", help="本地模型调用失败时终止")
-    parser.add_argument("--continue-on-error", action="store_true", help="批量模式中单个 PDF 失败后继续处理")
+    parser.add_argument("--continue-on-error", action="store_true", help="批量模式中单个文档失败后继续处理")
     return parser
 
 

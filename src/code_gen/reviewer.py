@@ -30,6 +30,7 @@ def _evidence_for_review(rule: MatchedRule) -> list[dict]:
                         "start": evidence.location.pdf_pages.start,
                         "end": evidence.location.pdf_pages.end,
                     },
+                    "page_basis": evidence.location.page_basis,
                 },
                 "text": text,
             }

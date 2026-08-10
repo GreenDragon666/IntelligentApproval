@@ -9,5 +9,7 @@ vllm                    # 起本地服务时安装：pip install vllm（体积�
 PyMuPDF>=1.24
 pypdf==6.15
 
+# DOC/DOCX/ODT/RTF/WPS 推荐安装系统 LibreOffice；DOCX 无 LibreOffice 时可用标准库降级抽取。
+
 # —— 可选：生成 checker 内部需要语义相似度时另行提供确定性本地能力 ——
 # sentence-transformers>=3.0
