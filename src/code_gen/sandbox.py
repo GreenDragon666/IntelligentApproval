@@ -49,7 +49,7 @@ import json
 from pathlib import Path
 
 import candidate
-from src.schema import MatchedRule, RuleResult
+from src.rule_schema import MatchedRule, RuleResult
 
 rule = MatchedRule.from_dict(json.loads(Path("input.json").read_text(encoding="utf-8")))
 result = candidate.check(rule)

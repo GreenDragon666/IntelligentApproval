@@ -6,9 +6,9 @@ from typing import Any, TypedDict
 
 from config import settings
 from .. import llm
-from ..checker_store import CheckerStore, checker_key
 from ..rule_schema import MatchedRule
 from . import prompts
+from .checker_store import CheckerStore, checker_key
 from .sandbox import extract_code, validate_checker
 
 

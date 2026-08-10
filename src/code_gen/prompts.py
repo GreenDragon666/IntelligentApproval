@@ -6,7 +6,7 @@ SYSTEM = "你是资深 Python 工程师，负责把招标审批规则翻译成�
 
 CHECKER_CONTRACT = '''\
 生成模块必须满足：
-1. 从 src.schema 导入 MatchedRule, RuleResult, Status, Finding。
+1. 从 src.rule_schema 导入 MatchedRule, RuleResult, Status, Finding。
 2. 暴露函数 check(rule: MatchedRule) -> RuleResult；不使用注册装饰器。
 3. 只能依据 rule.rule_text 编写通用逻辑，运行时读取 rule.evidence；禁止写入某个案件的原文。
 4. Finding.evidence_index 必须指向 rule.evidence 的下标，quote 必须来自对应 evidence.text。

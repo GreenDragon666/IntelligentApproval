@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from .page_schema import PolicyRule
+from ..page_schema import PolicyRule
 
 _ID_COLUMNS = ("序号", "rule_id", "规则序号")
 _RAW_COLUMNS = ("重点排查情形", "rule_raw", "规则原文", "规则描述")

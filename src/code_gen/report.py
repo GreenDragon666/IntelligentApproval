@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .rule_schema import ApprovalReport, MatchedCase, Status
+from ..rule_schema import ApprovalReport, MatchedCase, Status
 
 _LABEL = {
     Status.VIOLATION: "❌ 违规",

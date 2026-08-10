@@ -5,9 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.preprocess import prepare_case
-from src.preprocess.pdf import extract_pdf_pages
-from src.preprocess.rules import load_policy_rules
+from src.cont_match import load_policy_rules, prepare_case
+from src.dir_extr import extract_pdf_pages
 from src.rule_schema import MatchedCase
 
 
@@ -19,6 +18,10 @@ RULE_XLSX = REPORT / "规则-招标文件2对应内容-全量校正.xlsx"
 
 
 class PreprocessTest(unittest.TestCase):
+    @unittest.skipUnless(
+        RULE_JSON.is_file() and RULE_XLSX.is_file(),
+        "本地未同时提供 report_2 的正式 JSON 和政策 XLSX",
+    )
     def test_real_rule_sources(self) -> None:
         from_json = load_policy_rules(RULE_JSON)
         from_xlsx = load_policy_rules(RULE_XLSX)
@@ -28,6 +31,7 @@ class PreprocessTest(unittest.TestCase):
         self.assertEqual(from_xlsx[0].rule_raw, from_json[0].rule_raw)
         self.assertTrue(from_xlsx[0].match_hints)
 
+    @unittest.skipUnless(PDF.is_file(), "本地未提供 report_2 PDF")
     def test_real_pdf_dual_page_numbers(self) -> None:
         pages = extract_pdf_pages(PDF, document_page_1_pdf_page=9)
         self.assertEqual(len(pages), 204)
@@ -35,6 +39,10 @@ class PreprocessTest(unittest.TestCase):
         self.assertEqual(pages[8].pdf_page, 9)
         self.assertEqual(pages[8].document_page, 1)
 
+    @unittest.skipUnless(
+        PDF.is_file() and RULE_XLSX.is_file(),
+        "本地未同时提供 report_2 PDF 和政策 XLSX",
+    )
     def test_no_model_pipeline_writes_formal_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

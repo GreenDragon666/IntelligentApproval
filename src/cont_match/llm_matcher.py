@@ -7,7 +7,7 @@ import re
 
 from config import settings
 from .. import llm
-from .page_schema import PolicyRule, SectionCandidate
+from ..page_schema import PolicyRule, SectionCandidate
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 

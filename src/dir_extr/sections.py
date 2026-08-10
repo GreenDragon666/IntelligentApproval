@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from .page_schema import DocumentSection, PageText
+from ..page_schema import DocumentSection, PageText
 
 _HEADING_PATTERNS = [
     re.compile(r"^第[一二三四五六七八九十百零〇\d]+[章节篇卷]\s*.+$"),

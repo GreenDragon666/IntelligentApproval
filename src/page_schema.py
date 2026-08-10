@@ -1,4 +1,4 @@
-"""步骤一、二内部数据结构；正式输出仍使用 ``src.schema``。"""
+"""步骤一、二共享的内部数据结构；正式输出使用 ``src.rule_schema``。"""
 
 from __future__ import annotations
 

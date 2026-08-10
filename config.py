@@ -1,11 +1,4 @@
-"""集中配置。全部指向本地模型服务，不调用外部 API。
-
-模型权重默认路径（本机已下载）：
-  /home/zyl/public/LLM Library/Qwen2.5-Coder-3B-Instruct
-  /home/zyl/public/LLM Library/Qwen2.5-Coder-14B-Instruct
-
-先用 3B 把编写期链路跑通；资源够再切 14B。
-"""
+"""集中配置：所有 LLM 调用统一连接服务器本地 Qwen3-8B vLLM。"""
 
 from __future__ import annotations
 

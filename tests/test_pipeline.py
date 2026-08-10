@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.checker_store import checker_key
+from src.code_gen.checker_store import checker_key
 from src.engine import run_case
 from src.rule_schema import MatchedCase, Status
 
@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CASE_PATH = PROJECT_ROOT / "reports/report_2/matched/rules_matched.json"
 
 
+@unittest.skipUnless(CASE_PATH.is_file(), "本地未提供 report_2 正式匹配 JSON")
 class PipelineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

@@ -31,6 +31,7 @@
 
 约定：
 
+- `case_id` 由程序根据新建的 `reports/report_x/` 自动生成，不从命令行传入。
 - `source` 只允许 `file` 字段。
 - `rule_id` 必须是正整数，对应规则序号。
 - `rule_raw` 是规则原文，对应“重点排查情形”。
@@ -39,4 +40,4 @@
 - 没有匹配到原文时使用 `"evidence": []`，不得填充模拟内容。
 - `pdf_pages` 是 PDF 查看器中的物理页码；`document_pages` 是正文印刷页码。没有正文页码时，`document_pages` 为 `null`。
 
-代码通过 `src.schema.MatchedCase.from_json_file()` 读取并严格校验该结构。
+代码通过 `src.rule_schema.MatchedCase.from_json_file()` 读取并严格校验该结构。

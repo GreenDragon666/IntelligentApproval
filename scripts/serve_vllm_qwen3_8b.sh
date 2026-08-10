@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 启动步骤一、二使用的本地 Qwen3-7B（vLLM，OpenAI 兼容）。
+# 启动完整审批流程使用的本地 Qwen3-8B（vLLM，OpenAI 兼容）。
 # 必须显式提供服务器上的权重目录：
 #   export LLM_MODEL_PATH=/path/to/Qwen3-8B
 #   bash scripts/serve_vllm_qwen3_8b.sh

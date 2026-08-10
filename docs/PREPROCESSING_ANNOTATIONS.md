@@ -1,19 +1,19 @@
-# 新步骤一、二代码阅读标注
+# 步骤一、二代码阅读标注
 
-本目录实现的是“招标 PDF + 政策规则 → `rules_matched.json`”，不是原医疗规则抽取程序的直接改版。
+步骤一、二实现“招标 PDF + 政策规则 → `rules_matched.json`”，不是原医疗规则抽取程序的直接改版。
 
 ## 1. 调用顺序
 
 ```text
 prepare_case.py::main
-  → pipeline.prepare_case
-      ├─ pdf.extract_pdf_pages              # PDF逐页文本 + 双页码
-      ├─ pdf.extract_pdf_outline            # 原始书签目录
-      ├─ sections.split_sections            # 书签优先，标题规则兜底
-      ├─ rules.load_policy_rules             # JSON/XLSX政策规则
+  → cont_match.pipeline.prepare_case
+      ├─ dir_extr.extract_pdf_pages    # PDF逐页文本 + 双页码
+      ├─ dir_extr.extract_pdf_outline  # 原始书签目录
+      ├─ dir_extr.split_sections       # 书签优先，标题规则兜底
+      ├─ cont_match.load_policy_rules     # JSON/XLSX政策规则
       ├─ LexicalSectionMatcher               # 字符TF-IDF top-k
-      ├─ llm_matcher.select_candidates       # 可选本地Qwen重排/拒绝
-      ├─ schema.MatchedCase                  # 正式契约校验
+      ├─ cont_match.select_candidates         # 可选本地Qwen重排/拒绝
+      ├─ rule_schema.MatchedCase             # 正式契约校验
       └─ outline/sections/matches/manifest   # 可追溯中间产物
 ```
 
@@ -29,7 +29,7 @@ prepare_case.py::main
 
 ## 3. 逐函数说明
 
-### `pdf.py`
+### `src/dir_extr/pdf.py`
 
 | 函数 | 作用 | 与原代码关系 |
 |---|---|---|
@@ -40,7 +40,7 @@ prepare_case.py::main
 | `extract_pdf_pages` | 校验文件，按顺序选择提取器，并计算正文页码偏移 | 新项目主入口；原代码没有双页码模型 |
 | `extract_pdf_outline` | 用 PyMuPDF 读取 `(层级, 标题, PDF页)` 书签目录；失败返回空 | 新增；供目录拆分和 `outline.json` 使用 |
 
-### `sections.py`
+### `src/dir_extr/sections.py`
 
 | 函数 | 作用 | 说明 |
 |---|---|---|
@@ -51,7 +51,7 @@ prepare_case.py::main
 | `_heuristic` | 无书签时，根据每页检测到的标题形成连续章节 | 通用兜底路径 |
 | `split_sections` | 参数校验并选择书签路径或标题启发式路径 | 对外章节拆分入口 |
 
-### `rules.py`
+### `src/cont_match/rules.py`
 
 | 函数 | 作用 | 说明 |
 |---|---|---|
@@ -63,7 +63,7 @@ prepare_case.py::main
 | `_load_xlsx` | 用 zip/XML 读取第一个工作表、共享字符串和单元格 | 重写了原 XLSX 读取思路，不保留 CSV 转换 |
 | `load_policy_rules` | 按后缀选择 JSON/XLSX，拒绝其他格式 | 规则加载对外入口 |
 
-### `retrieval.py`
+### `src/cont_match/retrieval.py`
 
 | 函数 | 作用 | 与原代码关系 |
 |---|---|---|
@@ -72,14 +72,14 @@ prepare_case.py::main
 | `_cosine` | 用对数词频和 IDF 计算两个稀疏 Counter 的余弦相似度 | 新增长度归一化，避免长章节天然得高分 |
 | `rank` | 给匹配提示加权，综合正文/标题相似度，返回 top-k 正分候选 | 删除原 RPS 章节和医疗关键词先验 |
 
-### `llm_matcher.py`
+### `src/cont_match/llm_matcher.py`
 
 | 函数 | 作用 | 与原代码关系 |
 |---|---|---|
 | `_parse_json_object` | 依次解析 JSON 代码块或混杂文本中的第一个 JSON 对象 | 重写原 `extract_json_from_text` 思路 |
-| `select_candidates` | 把规则和 top-k 候选交给本地 Qwen3-7B，校验并返回至多 N 个候选 | 重写本地 OpenAI 兼容调用；模型可返回空数组 |
+| `select_candidates` | 把规则和 top-k 候选交给本地 Qwen3-8B，校验并返回至多 N 个候选 | 重写本地 OpenAI 兼容调用；模型可返回空数组 |
 
-### `pipeline.py`
+### `src/cont_match/pipeline.py`
 
 | 函数 | 作用 | 说明 |
 |---|---|---|
@@ -103,8 +103,20 @@ prepare_case.py::main
 
 | 函数 | 作用 |
 |---|---|
-| `parse_args` | 声明步骤一、二 CLI 参数，并检查 `--strict-llm` 必须与 `--use-llm` 共用 |
-| `main` | 将 CLI 参数传给 `prepare_case`，打印规则和证据统计 |
+| `_build_parser` | 声明步骤一、二的单文件/目录批量参数，不接收手工 `case_id` |
+| `_main_argv` | 将分阶段参数转换成统一入口参数，并固定加入 `--preprocess-only` |
+| `main` | 解析参数后调用统一入口，自动创建 `reports/report_x` |
+
+### 根目录 `main.py`
+
+| 函数 | 作用 |
+|---|---|
+| `_allocate_report_dir` | 扫描 `report_x`/旧式 `reportx`，原子创建最大编号加一的目录 |
+| `_discover_pdfs` | 递归发现 `--reports_path` 下的 PDF，并排除自动输出目录 |
+| `_process_pdf` | 复制输入 PDF、运行步骤一二，并按参数继续执行步骤三 |
+| `_write_report` | 调用审批引擎并写 `summary.json`、`summary.md` |
+| `_validate_args` | 校验三种输入模式和模型/生成参数组合 |
+| `main` | 处理已有 JSON、单个 PDF 或目录中的全部 PDF |
 
 ## 4. 明确没有复用的部分
 
@@ -121,4 +133,3 @@ prepare_case.py::main
 - 支持有文本层 PDF；扫描 PDF 当前明确报错，尚无通用 OCR 适配器。
 - 无模型模式是高召回候选模式，不能可靠拒绝“文件中没有相关内容”的规则。
 - `--use-llm` 只做章节相关性重排，不做最终合规判定；最终判定属于后续 checker 阶段。
-

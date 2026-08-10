@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from config import settings
-from .checker_store import CheckerStore, checker_key
-from .codegen.graph import generate_checker
-from .codegen.sandbox import run_checker
-from .reviewer import review as review_result
+from .code_gen.checker_store import CheckerStore, checker_key
+from .code_gen.graph import generate_checker
+from .code_gen.reviewer import review as review_result
+from .code_gen.sandbox import run_checker
 from .rule_schema import ApprovalReport, MatchedCase, MatchedRule, RuleResult, RuleRun, Status
 
 

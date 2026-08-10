@@ -1,14 +1,4 @@
-"""本地模型接入：OpenAI 兼容接口 → 本机 vLLM，不调用外部 API。
-
-起服务（3B，先搭好、默认不自动启动）：
-    bash scripts/serve_llm_3b.sh
-
-环境变量见 config.py：
-    LOCAL_LLM_BASE_URL   默认 http://localhost:8000/v1
-    LOCAL_LLM_MODEL      默认 Qwen2.5-Coder-3B-Instruct（与 --served-model-name 一致）
-    LOCAL_LLM_MODEL_PATH 默认 /home/zyl/public/LLM Library/Qwen2.5-Coder-3B-Instruct
-    LOCAL_LLM_API_KEY    占位，默认 EMPTY
-"""
+"""本地模型接入：OpenAI 兼容接口 → Qwen3-8B vLLM，不调用外部 API。"""
 
 from __future__ import annotations
 

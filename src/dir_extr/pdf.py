@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .page_schema import PageText
+from ..page_schema import PageText
 
 
 class PdfExtractionError(RuntimeError):

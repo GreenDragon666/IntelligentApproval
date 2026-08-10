@@ -1,4 +1,4 @@
-"""步骤一、二总入口：PDF → 章节 → 规则匹配 → 正式案件 JSON。"""
+"""步骤二生产入口：调用目录提取、执行规则匹配并输出正式 JSON。"""
 
 from __future__ import annotations
 
@@ -14,12 +14,11 @@ from ..rule_schema import (
     PageRange,
     SourceDocument,
 )
+from ..dir_extr import extract_pdf_outline, extract_pdf_pages, split_sections
+from ..page_schema import DocumentSection, SectionCandidate
 from .llm_matcher import select_candidates
-from .page_schema import DocumentSection, SectionCandidate
-from .pdf import extract_pdf_outline, extract_pdf_pages
 from .retrieval import LexicalSectionMatcher
 from .rules import load_policy_rules
-from .sections import split_sections
 
 
 def _write_json(path: Path, data: Any) -> None:

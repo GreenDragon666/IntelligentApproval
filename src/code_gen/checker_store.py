@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from config import settings
-from .rule_schema import MatchedRule
+from ..rule_schema import MatchedRule
 
 
 def rule_digest(rule_text: str) -> str:

@@ -6,8 +6,8 @@ import json
 import re
 
 from config import settings
-from . import llm
-from .rule_schema import MatchedRule, ReviewResult, RuleResult
+from .. import llm
+from ..rule_schema import MatchedRule, ReviewResult, RuleResult
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 

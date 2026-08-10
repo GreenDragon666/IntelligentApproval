@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from src.checker_store import CheckerStore, checker_key
-from src.codegen.graph import generate_checker
+from src.code_gen.checker_store import CheckerStore, checker_key
+from src.code_gen.graph import generate_checker
 from src.rule_schema import MatchedCase
 
 

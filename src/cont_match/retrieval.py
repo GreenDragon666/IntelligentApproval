@@ -6,7 +6,7 @@ import math
 import re
 from collections import Counter
 
-from .page_schema import DocumentSection, PolicyRule, SectionCandidate
+from ..page_schema import DocumentSection, PolicyRule, SectionCandidate
 
 _LEGAL_BASIS = re.compile(r"【法规依据】.*?(?=【公式】|【开发说明】|$)", re.DOTALL)
 

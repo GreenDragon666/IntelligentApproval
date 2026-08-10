@@ -1,325 +1,310 @@
 # 招标文件智能合规审批
 
-本项目先从招标 PDF 和政策规则生成 `rules_matched.json`，再使用服务器本地 Code-Agent
-生成可复用的 Python checker，对匹配原文执行确定性校验，并输出案件级审批报告。
+本项目把完整流程拆成三个边界清晰的步骤，同时提供一个统一入口：
 
-## 1. 技术框架
+1. 从招标 PDF 提取逐页文本、目录和章节；
+2. 将政策规则与招标章节匹配，生成约定的 `rules_matched.json`；
+3. 为规则生成并复用 Python checker，执行审批并输出报告。
 
-整套系统由四部分组成：
+所有模型调用统一连接服务器本地的 Qwen3-8B vLLM，不调用外部模型 API。模型服务由用户
+手动启动，程序不会在运行时自动加载模型。
 
-| 层次 | 使用的框架/组件 | 职责 |
-|---|---|---|
-| 步骤一 | PyMuPDF / pdftotext | 逐页提取 PDF、保留物理页和正文页、按书签或标题拆分章节 |
-| 步骤二 | 字符级 TF-IDF + 可选 Qwen3-7B | 规则候选召回、相关性重排、输出匹配原文 |
-| 模型服务 | vLLM | 在服务器加载 Qwen2.5-Coder，并提供 OpenAI 兼容的本地 HTTP 接口 |
-| 模型客户端 | OpenAI Python SDK | 只连接本机 vLLM，例如 `http://127.0.0.1:8000/v1`，不调用外部 API |
-| Code-Agent 编排 | LangGraph | 组织“生成代码 → 验证 → 失败反馈 → 重试 → 保存”状态图 |
-| 确定性运行时 | Python 子进程 | 执行已生成 checker，限制执行时间并校验返回契约和证据引用 |
-
-默认模型为 `Qwen2.5-Coder-3B-Instruct`，资源充足时可切换到
-`Qwen2.5-Coder-14B-Instruct`。
+## 1. 代码结构
 
 ```text
-招标PDF ─→ 章节拆分 ─→ 规则候选召回 ─→ 可选Qwen重排 ─→ rules_matched.json
-                                                               │
-                         ┌──────────────────────────────┐      │
-                         │ 规则哈希与 checker 缓存查找 │←─────┘
-                         └──────────────┬───────────────┘
-                                        │
-                    ┌───────────────────┴───────────────────┐
-                    │                                       │
-              已有 checker                            缺少 checker
-                    │                                       │
-                    │                         LangGraph + 本地 Qwen 生成
-                    │                                       │
-                    └───────────────────┬───────────────────┘
-                                        ↓
-                               子进程验证并执行
-                                        ↓
-                           可选 LLM 复核与定向重生成
-                                        ↓
-                            summary.json + summary.md
+src/
+├── dir_extr/                   # 步骤一：PDF、目录、章节
+│   ├── pdf.py
+│   └── sections.py
+├── cont_match/                 # 步骤二：规则读取、召回、LLM 重排
+│   ├── rules.py
+│   ├── retrieval.py
+│   ├── llm_matcher.py
+│   └── pipeline.py             # 串联步骤一、二并输出正式 JSON
+├── code_gen/                   # 步骤三：checker 生成到报告
+│   ├── checker_store.py        # checker 哈希、保存与复用
+│   ├── graph.py                # 生成、验证、失败重试状态图
+│   ├── prompts.py
+│   ├── sandbox.py              # 静态检查与限时子进程执行
+│   ├── reviewer.py             # 可选 LLM 复核
+│   └── report.py               # JSON/Markdown 报告
+├── page_schema.py              # 步骤一、二共享的内部数据结构
+├── engine.py                   # 案件审批总编排
+├── llm.py                      # 步骤二、三共用的本地模型客户端
+└── rule_schema.py              # 步骤二输出、步骤三输入的正式契约
+
+main.py                         # 三步统一入口，也支持从中间结果开始
+prepare_case.py                 # 步骤一、二独立运行/排错入口
+gen_checker.py                  # 单条规则 checker 生成/修复入口
+scripts/run_batch.py            # 多案件批量完整运行
 ```
 
-## 2. 正式输入
+`checker_store.py`、`reviewer.py` 和 `report.py` 都只被第三步使用，因此归入 `code_gen/`。
+`llm.py` 同时服务内容匹配和 checker 生成；`rule_schema.py` 横跨步骤二、三；
+`page_schema.py` 横跨步骤一、二，所以保留在 `src/` 顶层。步骤一、二的生产串联逻辑属于
+内容匹配的输出阶段，因此放在 `cont_match/pipeline.py`，不再额外保留 `preprocessing.py`。
 
-输入格式见 [docs/MATCHED_JSON.md](docs/MATCHED_JSON.md)。案件目录建议为：
+更详细的依赖和数据流见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。逐函数说明见
+[docs/PREPROCESSING_ANNOTATIONS.md](docs/PREPROCESSING_ANNOTATIONS.md)。同伴原始代码及标注保留在
+`references/stage1+2/`，不进入生产调用链。`reports/` 仅由程序自动生成案件产物。
 
-```text
-reports/
-  report_2/
-    招标文件2.pdf
-    matched/
-      rules_matched.json
-    results/
-      summary.json
-      summary.md
-```
-
-checker 生成提示词只包含 `rule_id`、`rule_raw` 和 `rule_text`，不包含某个案件的
-原文。案件原文只在执行时通过 `evidence` 传入，因此相同规则的 checker 可以跨案件复用。
-
-## 3. 步骤一、二：PDF 拆分和规则原文匹配
-
-### 3.1 对同伴代码的核对结论
-
-`stage1+2/` 保留为原始参考，不直接放进生产调用链。代码核对后的实际职责如下：
-
-逐函数用途、领域耦合点和迁移状态见
-[`stage1+2/CODE_ANNOTATIONS.md`](stage1+2/CODE_ANNOTATIONS.md)；新实现的逐函数调用图见
-[`src/preprocess/ANNOTATIONS.md`](src/preprocess/ANNOTATIONS.md)。原脚本中的核心长函数也已用
-`[阅读标注 N/M]` 按功能阶段分段。
-
-| 文件 | 实际功能 | 本项目处理 |
-|---|---|---|
-| `stage1_docx_v35_llm_ready_split_refs.py` | 扫描医疗审查 DOCX，抽取医疗器械候选规则，并与 RPS 章节做字符级相似度匹配 | 只借鉴逐页文本、字符级召回等思路 |
-| `stage2_v17_delete_known_nonexec.py` | 使用 LLM 把医疗规则结构化，并带有缓存、重试和 JSON 校验 | 只借鉴本地 OpenAI 兼容调用和结构校验思路 |
-| 两个脚本整体 | 含大量“义齿、医疗器械、RPS、产品标签”等写死条件 | 不集成这些领域条件，原文件不修改 |
-
-也就是说，这份代码不是现成的“招标 PDF 目录拆分 + 政策到招标原文匹配”实现。当前新增的
-`src/preprocess/` 是面向政策审批场景的独立实现，没有义齿或医疗器械词表。
-
-### 3.2 新的模块化流程
+## 2. 完整数据流
 
 ```text
 招标 PDF
-  → src/preprocess/pdf.py：逐页文本、PDF物理页、正文印刷页
-  → src/preprocess/sections.py：优先书签，否则通用标题规则，长章节按页切块
-政策规则 JSON/XLSX
-  → src/preprocess/rules.py：rule_id、rule_raw、rule_text、匹配提示
-章节 + 规则
-  → src/preprocess/retrieval.py：领域无关的字符级 TF-IDF top-k 召回
-  → src/preprocess/llm_matcher.py：可选本地 Qwen3-7B 重排或判定无匹配
-  → src/preprocess/pipeline.py：组装并校验 MatchedCase
-  → rules_matched.json
+  │
+  ▼
+步骤一 dir_extr
+  逐页文本 + PDF物理页 + 正文印刷页 + 章节
+  │
+  ▼
+步骤二 cont_match  ◀── 政策规则 JSON/XLSX
+  字符级 TF-IDF 召回 + 可选 Qwen3-8B 重排
+  │
+  ▼
+rules_matched.json
+  │
+  ▼
+步骤三 code_gen
+  checker 缓存/生成 → 子进程执行 → 可选复核 → 审批报告
 ```
 
-政策 XLSX 至少需要以下列：
+步骤一、二负责定位原文，不直接判定违规。步骤三的 checker 才根据规则和已匹配 evidence
+给出 `violation`、`warning`、`pass`、`insufficient_input` 或 `error`。
 
-- `序号`：输出为整数 `rule_id`；
-- `重点排查情形`：输出为 `rule_raw`；
-- `触发逻辑公式`：输出为 `rule_text`。
+正式 JSON 契约见 [docs/MATCHED_JSON.md](docs/MATCHED_JSON.md)。关键约束是：
 
-`触发逻辑`、`非结构化文件中模块`、`非结构化文件`、`检查方式`、
-`结构化数据展示字段` 等列只作为匹配提示。原 Excel 最后一列已有的匹配结果不会被读取。
-项目不再保留 CSV 转 JSON 的一次性转换流程。
+- `rule_id` 是规则整数序号；
+- `rule_raw` 对应政策表“重点排查情形”；
+- `source` 只包含 `file`；
+- `evidence.location` 同时保存 PDF 物理页和正文印刷页；
+- checker 生成时不向模型提供某个案件的 evidence，确保相同规则可跨案件复用。
 
-### 3.3 本机无模型跑通
+## 3. 启动 Qwen3-8B vLLM
+
+先在模型服务终端进入项目环境，然后设置服务端变量：
 
 ```bash
-python prepare_case.py \
-  --case-id report_2 \
-  --pdf reports/report_2/招标文件2.pdf \
-  --rules reports/report_2/规则-招标文件2对应内容-全量校正.xlsx \
-  --output reports/report_2/matched/rules_matched.generated.json \
-  --artifacts-dir reports/report_2/preprocess \
-  --document-page-1-pdf-page 9
+export LLM_CUDA_VISIBLE_DEVICES=0,1,2,3
+export LLM_MODEL_PATH="/home/zyl/public/LLM Library/Qwen3-8B"
+export LLM_MODEL=Qwen3-8B
+export LLM_HOST=127.0.0.1
+export LLM_PORT=8001
+export LLM_MAX_MODEL_LEN=16384
+export LLM_GPU_MEM_UTIL=0.9
+
+bash scripts/serve_vllm_qwen3_8b.sh --tensor-parallel-size 4
 ```
 
-不传 `--use-llm` 时不会访问模型，只使用字符级召回。该模式适合验证拆分、页码和 JSON
-链路，也会尽量给每条规则保留最相关候选；它不能可靠判断“政策规则在文件中完全没有对应原文”。
-正式提取建议启用本地 Qwen，让模型可以从 top-k 中选择，也可以返回空数组。
-
-`--document-page-1-pdf-page 9` 表示：PDF 查看器第 9 页是正文印刷第 1 页，程序据此同时输出：
-
-```json
-"pdf_pages": {"start": 41, "end": 42},
-"document_pages": {"start": 33, "end": 34}
-```
-
-中间产物用于追溯和调参：
-
-| 文件 | 内容 |
-|---|---|
-| `outline.json` | PDF 原始书签目录；无书签时为空数组 |
-| `sections.json` | 按书签或通用标题拆出的章节、双页码和完整原文 |
-| `matches.json` | 每条规则的 top-k、分数、最终选择和 LLM 降级错误 |
-| `manifest.json` | 页数、章节数、规则数、参数和输出位置 |
-
-### 3.4 服务器启用 Qwen3-7B
-
-模型权重路径由服务器实际情况决定，不在代码里写死：
+如果只用一张指定 GPU，例如物理 GPU 2：
 
 ```bash
-export STAGE12_LLM_MODEL_PATH="/实际路径/Qwen3-7B"
-export STAGE12_LLM_MODEL=Qwen3-7B
-export STAGE12_LLM_HOST=127.0.0.1
-export STAGE12_LLM_PORT=8001
-bash scripts/serve_stage12_qwen3_7b.sh
+export LLM_CUDA_VISIBLE_DEVICES=2
+bash scripts/serve_vllm_qwen3_8b.sh --tensor-parallel-size 1
 ```
 
-另开终端运行预处理：
+`LLM_MAX_MODEL_LEN` 是单次请求允许的最大上下文长度，越大 KV cache 显存开销越高；
+`LLM_GPU_MEM_UTIL` 是 vLLM 可使用的每张可见 GPU 显存比例。当前默认值 `16384` 和 `0.9`
+适合先在已跑通的服务器配置上使用；如果启动时显存不足，优先降低最大长度或显存比例。
+
+另开业务程序终端设置客户端变量：
 
 ```bash
-export STAGE12_LLM_BASE_URL=http://127.0.0.1:8001/v1
-export STAGE12_LLM_MODEL=Qwen3-7B
+export LOCAL_LLM_BASE_URL=http://127.0.0.1:8001/v1
+export LOCAL_LLM_MODEL=Qwen3-8B
+export LOCAL_LLM_API_KEY=EMPTY
 
-python prepare_case.py \
-  --case-id report_2 \
-  --pdf reports/report_2/招标文件2.pdf \
-  --rules /path/to/policy_rules.xlsx \
-  --output reports/report_2/matched/rules_matched.json \
-  --artifacts-dir reports/report_2/preprocess \
+python -c "from src.llm import healthcheck; print(healthcheck())"
+```
+
+服务端 `LLM_MODEL` 与客户端 `LOCAL_LLM_MODEL` 必须一致；服务端 `LLM_PORT` 与
+`LOCAL_LLM_BASE_URL` 中的端口也必须一致。
+
+| 位置 | 变量 | 默认值/作用 |
+|---|---|---|
+| 服务脚本 | `LLM_MODEL_PATH` | 必填，Qwen3-8B 权重目录 |
+| 服务脚本 | `LLM_MODEL` | `Qwen3-8B`，vLLM served model name |
+| 服务脚本 | `LLM_CUDA_VISIBLE_DEVICES` | `0,1,2,3`，指定服务可见 GPU |
+| 服务脚本 | `LLM_HOST` / `LLM_PORT` | `127.0.0.1` / `8001` |
+| 服务脚本 | `LLM_MAX_MODEL_LEN` | `16384` |
+| 服务脚本 | `LLM_GPU_MEM_UTIL` | `0.9` |
+| Python 客户端 | `LOCAL_LLM_BASE_URL` | `http://localhost:8001/v1` |
+| Python 客户端 | `LOCAL_LLM_MODEL` | `Qwen3-8B` |
+| Python 客户端 | `LOCAL_LLM_CANDIDATE_CHARS` | `1200`，每个匹配候选最多发送的字符数 |
+
+## 4. 一条命令运行完整流程
+
+vLLM 启动并通过健康检查后，运行：
+
+```bash
+python main.py \
+  --one_report_path /incoming/招标文件2.pdf \
+  --policy-rules /path/to/policy_rules.xlsx \
   --document-page-1-pdf-page 9 \
-  --use-llm
+  --use-llm \
+  --strict-llm
 ```
 
-默认情况下，单条规则的模型调用失败会记录到 `matches.json`，并降级为字符级选择；如要求
-任何模型失败都终止任务，增加 `--strict-llm`。生成正式 JSON 后，再运行步骤三：
+这个入口依次完成目录提取、内容匹配、checker 生成/复用、执行和报告输出。`--use-llm`
+控制步骤二是否用 Qwen 重排；步骤三在缺少 checker 时默认会使用同一个 Qwen3-8B 服务生成代码。
+需要额外复核 checker 结果时增加 `--review`。
+
+程序不接收 `case_id`。它扫描 `reports/` 中已有的 `report_x`（同时兼容旧式 `reportx`），
+自动创建最大编号加一的目录，并把输入 PDF 复制进去。默认产物结构：
+
+```text
+reports/report_2/
+├── 招标文件2.pdf
+├── matched/
+│   └── rules_matched.json
+├── preprocessing/
+│   ├── outline.json
+│   ├── sections.json
+│   ├── matches.json
+│   └── manifest.json
+└── results/
+    ├── summary.json
+    └── summary.md
+
+generated_checkers/
+├── rule_<rule_id>_<hash>.py
+└── rule_<rule_id>_<hash>.json
+```
+
+`--document-page-1-pdf-page 9` 表示 PDF 查看器第 9 页对应正文印刷第 1 页，因此正文页码为
+PDF 页码减 8。输出 evidence 会同时保留两种页码，避免目录印刷页与 PDF 物理页混用。
+
+## 5. 分阶段运行与排错
+
+### 5.1 单独运行步骤一、二
+
+```bash
+python prepare_case.py \
+  --one_report_path /incoming/招标文件2.pdf \
+  --policy-rules /path/to/policy_rules.xlsx \
+  --document-page-1-pdf-page 9 \
+  --use-llm \
+  --strict-llm
+```
+
+也可以用统一入口运行到步骤二后停止：
+
+```bash
+python main.py \
+  --one_report_path /incoming/招标文件2.pdf \
+  --policy-rules /path/to/policy_rules.xlsx \
+  --document-page-1-pdf-page 9 \
+  --use-llm \
+  --strict-llm \
+  --preprocess-only
+```
+
+不传 `--use-llm` 时只使用字符级召回，不访问模型。这适合验证页码、章节和 JSON 链路；
+正式匹配建议使用 Qwen 重排，使模型可以拒绝所有无关候选。默认情况下模型失败会记录后降级，
+`--strict-llm` 则要求任何匹配模型失败都终止。
+
+### 5.2 从已有 JSON 单独运行步骤三
 
 ```bash
 python main.py --input reports/report_2/matched/rules_matched.json
 ```
 
-当前 PDF 路径支持有文本层的文件。扫描件 OCR 尚未纳入新流水线；同伴代码中的 OCR 与医疗版式
-耦合较深，因此没有直接复制。遇到扫描件时程序不会伪造原文，应先增加通用 OCR 适配器。
-
-## 4. Checker 如何命名和定位
-
-系统对规范化后的 `rule_text` 计算 SHA-256，再和整数 `rule_id` 组合：
-
-```text
-rule_<rule_id>_<规则哈希前12位>
-```
-
-例如：
-
-```text
-rule_2_ca58dcf50a00
-```
-
-对应文件：
-
-```text
-generated_checkers/
-  rule_2_ca58dcf50a00.py      # checker 代码
-  rule_2_ca58dcf50a00.json    # 模型、完整哈希、生成时间、生成尝试次数
-```
-
-每条报告记录都会包含：
-
-```json
-{
-  "rule_id": 2,
-  "checker_key": "rule_2_ca58dcf50a00",
-  "checker_reused": true,
-  "generation_attempts": 0,
-  "result": {},
-  "review": null,
-  "error": ""
-}
-```
-
-因此出现问题时：
-
-1. 用 `rule_id` 定位案件 JSON 中的规则；
-2. 用 `checker_key` 定位 `generated_checkers/` 中实际执行的代码和元数据；
-3. 用 `error` 查看代码生成或执行错误；
-4. 用 `review.feedback` 查看 LLM 复核不通过的原因。
-
-列出报告中的失败规则：
-
-```bash
-python -c '
-import json
-data = json.load(open("reports/report_2/results/summary.json", encoding="utf-8"))
-for item in data["rules"]:
-    if item["error"]:
-        print(item["rule_id"], item["checker_key"], item["error"])
-'
-```
-
-查看指定 checker：
-
-```bash
-ls -l generated_checkers/rule_2_ca58dcf50a00.*
-sed -n '1,240p' generated_checkers/rule_2_ca58dcf50a00.py
-```
-
-## 5. 某条规则出错后的处理
-
-### 5.1 自动处理：代码执行异常
-
-正常运行时，如果 checker 在真实 evidence 上出现异常，系统会：
-
-```text
-捕获当前规则的执行错误
-  → 将“旧代码 + 错误信息 + 原规则”反馈给本地模型
-  → 只重新生成当前 rule_id 的 checker
-  → 再次验证并执行
-  → 其他规则不受影响
-```
-
-该路径默认启用，不需要额外参数。每次代码生成内部最多尝试
-`CODEGEN_MAX_RETRIES` 次，默认是 3 次。
-
-### 5.2 自动处理：LLM 复核不通过
-
-使用 `--review` 时，checker 执行后会由同一个本地模型复核“规则、证据、执行结果”是否一致：
+只执行指定规则：
 
 ```bash
 python main.py \
   --input reports/report_2/matched/rules_matched.json \
-  --review
+  --rules 2 3 4
 ```
 
-如果复核返回 `approved=false`：
+严格无模型诊断模式：
 
-```text
-review.feedback
-  → 作为额外修改要求反馈给 Code-Agent
-  → 覆盖式重新生成当前规则的 checker
-  → 再执行
-  → 再复核
+```bash
+python main.py \
+  --input reports/report_2/matched/rules_matched.json \
+  --no-generate
 ```
 
-复核反馈迭代次数由 `REVIEW_MAX_RETRIES` 控制，默认 1 次。
+无模型模式仍会执行已有 checker；没有缓存的规则会明确记录为 `error`，空 evidence 会记录为
+`insufficient_input`。如果同时传 `--review`，复核仍会访问模型。
 
-### 5.3 手工定位并重新生成单条规则
-
-如果人工检查报告后认为第 2 条规则有问题：
+### 5.3 生成或修复单条 checker
 
 ```bash
 python gen_checker.py \
   --input reports/report_2/matched/rules_matched.json \
-  --rule-id 2 \
-  --feedback "未正确区分有量化说明和无量化说明的合理表述，请修正上下文判断" \
-  --force
-```
+  --rule-id 2
 
-其中：
-
-- `--rule-id 2`：精确选择规则；
-- `--feedback`：把人工发现的问题传给代码模型；
-- `--force`：即使当前哈希已有 checker，也重新生成并覆盖。
-
-生成后只复跑该规则：
-
-```bash
 python main.py \
   --input reports/report_2/matched/rules_matched.json \
   --rules 2 \
   --no-generate
 ```
 
-如果还要做 LLM 复核：
+`prepare_case.py` 和 `gen_checker.py` 都是可直接运行的分阶段运维/排错入口，不是单元测试。
+正式整案运行仍以 `main.py` 为准。
+
+### 5.4 批量运行多个案件
+
+`--reports_path` 会递归查找输入目录中的所有 `.pdf`，其他文件自动跳过。启动 vLLM 后运行：
+
+```bash
+python scripts/run_batch.py \
+  --reports_path /incoming/tenders \
+  --policy-rules /path/to/policy_rules.xlsx \
+  --document-page-1-pdf-page 9 \
+  --use-llm \
+  --strict-llm
+```
+
+默认任一案件失败就停止。希望继续处理后续案件并在最后汇总失败项时增加：
+
+```bash
+python scripts/run_batch.py \
+  --reports_path /incoming/tenders \
+  --policy-rules /path/to/policy_rules.xlsx \
+  --document-page-1-pdf-page 9 \
+  --use-llm \
+  --strict-llm \
+  --continue-on-error
+```
+
+也可以直接使用统一入口：
 
 ```bash
 python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --review
+  --reports_path /incoming/tenders \
+  --policy-rules /path/to/policy_rules.xlsx \
+  --document-page-1-pdf-page 9 \
+  --use-llm \
+  --strict-llm
 ```
 
-确认单条规则正常后，再运行全案：
+每个 PDF 会单独生成新的 `reports/report_x/`。批量脚本调用同一个 `main.py`，因此单文件和批量
+行为保持一致。不要把待解析 PDF 放进自动输出的 `reports/` 目录。
+
+## 6. Checker 缓存、定位和重新生成
+
+系统对规范化后的 `rule_text` 计算 SHA-256，并生成：
+
+```text
+rule_<rule_id>_<规则哈希前12位>
+```
+
+报告中的 `checker_key` 可直接定位 `generated_checkers/` 下的 `.py` 代码和 `.json` 元数据。
+规则内容变化时哈希也变化，不会误用旧规则的 checker。
+
+人工重新生成第 2 条规则：
 
 ```bash
-python main.py --input reports/report_2/matched/rules_matched.json
+python gen_checker.py \
+  --input reports/report_2/matched/rules_matched.json \
+  --rule-id 2 \
+  --feedback "这里填写人工发现的问题" \
+  --force
 ```
 
-### 5.4 直接在完整入口强制重新生成
-
-不需要人工反馈时，可以用完整入口忽略缓存并重新生成指定规则：
+或者直接在案件入口中忽略缓存：
 
 ```bash
 python main.py \
@@ -328,371 +313,34 @@ python main.py \
   --force-regenerate
 ```
 
-### 5.5 “重新生成”和“恢复上一版”的区别
+checker 在真实 evidence 上执行异常时，`engine.py` 会把错误反馈给模型，只重生成当前规则；
+传入 `--review` 后，复核不通过也只迭代当前规则。其他规则不受影响。
 
-当前实现支持的是：
+当前同一 `checker_key` 的重新生成会覆盖原 `.py/.json`，尚未实现内置历史版本与一键回滚。
+需要恢复上一版时，应依赖 Git、服务器快照或人工备份；“重新生成”不等同于“恢复旧版本”。
 
-- 出错后重新生成；
-- 复核失败后携带反馈重新生成；
-- 人工指定规则强制重新生成。
-
-当前保存方式是覆盖同一个 `checker_key` 的 `.py` 和 `.json` 文件，尚未内置 checker
-历史版本目录。因此它不是严格意义上的“恢复上一版代码”。如果需要恢复旧版本，目前应通过
-Git、服务器文件快照或手工备份恢复。后续可以增加：
-
-```text
-generated_checkers/history/<checker_key>/<timestamp>/
-```
-
-并提供显式的 `list-versions` 和 `rollback` 命令。在实现历史版本前，不应把“重新生成”描述为
-“版本回滚”。
-
-## 6. 服务器首次部署
-
-以下路径按照当前服务器约定编写：
-
-```text
-Conda 环境：/home/zyl/miniconda3/envs/approval
-3B 模型：/home/zyl/public/LLM Library/Qwen2.5-Coder-3B-Instruct
-14B 模型：/home/zyl/public/LLM Library/Qwen2.5-Coder-14B-Instruct
-```
-
-### 6.1 进入环境
-
-```bash
-source /home/zyl/miniconda3/etc/profile.d/conda.sh
-conda activate approval
-cd /home/zyl/private/Coding/IntelligentApproval
-```
-
-如果服务器上的项目目录不同，以实际目录为准。
-
-### 6.2 安装项目依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-确认 vLLM 已安装：
-
-```bash
-vllm --version
-```
-
-如果没有安装，需要根据服务器 CUDA/PyTorch 环境安装：
-
-```bash
-pip install vllm
-```
-
-vLLM 体积较大，并且与 CUDA/PyTorch 版本相关，生产服务器上应固定经过验证的依赖版本。
-
-### 6.3 检查模型目录
-
-```bash
-ls -ld "/home/zyl/public/LLM Library/Qwen2.5-Coder-3B-Instruct"
-ls -ld "/home/zyl/public/LLM Library/Qwen2.5-Coder-14B-Instruct"
-```
-
-## 7. 启动本地模型服务
-
-模型服务必须由用户手动启动，审批程序不会自动启动 vLLM。
-
-### 7.1 启动 3B 模型
-
-如果审批程序和模型在同一台服务器，建议只监听本机地址：
-
-```bash
-export LOCAL_LLM_HOST=127.0.0.1
-export LOCAL_LLM_PORT=8000
-export LOCAL_LLM_MODEL=Qwen2.5-Coder-3B-Instruct
-export LOCAL_LLM_MODEL_PATH="/home/zyl/public/LLM Library/Qwen2.5-Coder-3B-Instruct"
-
-bash scripts/serve_llm_3b.sh
-```
-
-脚本内部执行的是：
-
-```text
-vllm serve <模型路径>
-  --served-model-name Qwen2.5-Coder-3B-Instruct
-  --host 127.0.0.1
-  --port 8000
-  --max-model-len 4096
-  --gpu-memory-utilization 0.85
-```
-
-如果需要更长上下文，例如启用包含较长 evidence 的 `--review`：
-
-```bash
-export LOCAL_LLM_MAX_MODEL_LEN=8192
-bash scripts/serve_llm_3b.sh
-```
-
-上下文越长，显存占用越高，应根据服务器实际显存调整。
-
-### 7.2 启动 14B 模型
-
-```bash
-export LOCAL_LLM_HOST=127.0.0.1
-export LOCAL_LLM_PORT=8000
-export LOCAL_LLM_MODEL=Qwen2.5-Coder-14B-Instruct
-export LOCAL_LLM_MODEL_PATH="/home/zyl/public/LLM Library/Qwen2.5-Coder-14B-Instruct"
-
-bash scripts/serve_llm_14b.sh
-```
-
-多 GPU 时，可把 vLLM 参数直接追加给脚本：
-
-```bash
-bash scripts/serve_llm_14b.sh --tensor-parallel-size 2
-```
-
-### 7.3 使用 tmux 保持服务运行
-
-```bash
-tmux new -s approval-llm
-source /home/zyl/miniconda3/etc/profile.d/conda.sh
-conda activate approval
-cd /home/zyl/private/Coding/IntelligentApproval
-bash scripts/serve_llm_3b.sh
-```
-
-按 `Ctrl+b`，再按 `d`，可以退出 tmux 而不停止服务。重新进入：
-
-```bash
-tmux attach -t approval-llm
-```
-
-停止服务时，在模型终端按 `Ctrl+C`。
-
-## 8. 验证模型服务
-
-另开一个服务器终端，激活相同环境并进入项目目录。
-
-### 8.1 检查 OpenAI 兼容接口
-
-```bash
-curl http://127.0.0.1:8000/v1/models
-```
-
-返回内容中应出现：
-
-```text
-Qwen2.5-Coder-3B-Instruct
-```
-
-### 8.2 使用项目客户端检查
-
-```bash
-export LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1
-export LOCAL_LLM_MODEL=Qwen2.5-Coder-3B-Instruct
-
-python -c "from src.llm import healthcheck; print(healthcheck())"
-```
-
-`ok` 应为 `True`。特别注意：
-
-- vLLM 的 `--served-model-name`；
-- 客户端的 `LOCAL_LLM_MODEL`；
-
-两者必须一致。
-
-如果模型服务使用其他端口，例如 8001：
-
-```bash
-export LOCAL_LLM_PORT=8001
-# 模型服务终端使用上面的 PORT 启动
-
-export LOCAL_LLM_BASE_URL=http://127.0.0.1:8001/v1
-# 审批程序终端使用上面的 BASE_URL
-```
-
-## 9. 推荐的首次跑通顺序
-
-不要第一次就直接生成全部 41 条。建议按以下顺序排查环境和模型质量。
-
-如果从原始 PDF 和政策表开始，先按第 3 节运行 `prepare_case.py`，检查 `manifest.json`、
-`sections.json` 和 `matches.json`，确认后再进入以下 checker 流程。
-
-### 第一步：校验正式 JSON，不调用模型
-
-```bash
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --no-generate
-```
-
-首次没有 checker 时，规则 2 显示 `error` 是预期结果；这一步只是确认 JSON 和案件入口正常。
-
-### 第二步：生成一条 checker
-
-```bash
-python gen_checker.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rule-id 2
-```
-
-成功后应出现：
-
-```text
-generated_checkers/rule_2_<hash>.py
-generated_checkers/rule_2_<hash>.json
-```
-
-### 第三步：不调用模型，执行已缓存 checker
-
-```bash
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --no-generate
-```
-
-这一步证明 checker 已经可以独立运行。
-
-### 第四步：执行并启用 LLM 复核
-
-```bash
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --review
-```
-
-检查：
-
-- `results/summary.json` 中的 `result`；
-- `review.approved`；
-- `review.feedback`；
-- `generation_attempts`；
-- `error`。
-
-### 第五步：小批量规则
-
-```bash
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 3 4 5
-```
-
-### 第六步：完整案件
-
-```bash
-python main.py --input reports/report_2/matched/rules_matched.json
-```
-
-### 第七步：稳定运行时不启用模型生成
-
-checker 经过验证并缓存后，可以在审批运行阶段执行：
-
-```bash
-python main.py \
-  --input reports/report_3/matched/rules_matched.json \
-  --no-generate
-```
-
-只要 report_3 的规则文本和已缓存版本相同，就会直接复用 checker。缺少 checker 的规则会明确
-记录为 `error`，不会悄悄跳过。
-
-## 10. 参数说明
-
-### `prepare_case.py`
-
-| 参数 | 含义 |
-|---|---|
-| `--case-id` | 必填，案件编号 |
-| `--pdf` | 必填，招标文件 PDF |
-| `--rules` | 必填，政策规则 JSON 或 XLSX |
-| `--output` | 必填，正式 `rules_matched.json` 输出位置 |
-| `--artifacts-dir` | 保存章节、候选匹配和运行清单 |
-| `--document-page-1-pdf-page` | 正文印刷第 1 页对应的 PDF 物理页 |
-| `--max-section-pages` | 单个匹配块最多页数，默认 8 |
-| `--candidate-count` | 每条规则送入重排的候选数，默认 8 |
-| `--evidence-count` | 每条规则最多保留的证据块数，默认 2 |
-| `--minimum-score` | 无模型模式保留候选的最低字符级分数，默认 0.03 |
-| `--use-llm` | 使用本地 Qwen3-7B 重排并允许拒绝全部候选 |
-| `--strict-llm` | 任一模型调用失败即终止，不做字符级降级 |
-
-### `main.py`
-
-| 参数 | 含义 |
-|---|---|
-| `--input` | 必填，案件 `rules_matched.json` |
-| `--rules 2 4 6` | 只运行指定整数规则序号 |
-| `--out` | 自定义报告目录；默认是案件目录下 `results/` |
-| `--no-generate` | 缺少 checker 时不调用模型生成 |
-| `--force-regenerate` | 忽略已有缓存并重新生成 |
-| `--review` | 使用本地 LLM 复核并反馈迭代 |
-| `--checker-dir` | 自定义全局 checker 缓存目录 |
-
-注意：`--no-generate` 只禁止代码生成。如果同时显式传入 `--review`，复核仍需要模型。严格无模型运行时
-不要传 `--review`。
-
-### 环境变量
+## 7. 常用配置
 
 | 环境变量 | 默认值 | 含义 |
 |---|---|---|
-| `STAGE12_LLM_BASE_URL` | `http://localhost:8001/v1` | 步骤一、二连接的 Qwen3-7B vLLM 地址 |
-| `STAGE12_LLM_MODEL` | `Qwen3-7B` | 步骤一、二使用的 served model name |
-| `STAGE12_LLM_API_KEY` | `EMPTY` | 本地接口占位 key |
-| `STAGE12_CANDIDATE_CHARS` | `1200` | 每个候选最多送入重排模型的字符数 |
-| `STAGE12_LLM_MODEL_PATH` | 无，必须显式设置 | Qwen3-7B 服务脚本加载的权重目录 |
-| `STAGE12_LLM_PORT` | `8001` | Qwen3-7B 服务端口 |
-| `STAGE12_LLM_MAX_MODEL_LEN` | `16384` | Qwen3-7B 服务上下文长度 |
-| `LOCAL_LLM_BASE_URL` | `http://localhost:8000/v1` | 审批程序连接的 vLLM 地址 |
-| `LOCAL_LLM_MODEL` | `Qwen2.5-Coder-3B-Instruct` | 客户端请求使用的 served model name |
-| `LOCAL_LLM_MODEL_PATH` | 3B 模型目录 | vLLM 加载的权重目录 |
-| `LOCAL_LLM_HOST` | `0.0.0.0` | vLLM 监听地址；同机部署建议设为 `127.0.0.1` |
-| `LOCAL_LLM_PORT` | `8000` | vLLM 端口 |
-| `LOCAL_LLM_MAX_MODEL_LEN` | `4096` | vLLM 最大上下文长度 |
-| `LOCAL_LLM_GPU_MEM_UTIL` | 3B 为 `0.85` | vLLM 可使用的 GPU 显存比例 |
-| `CODEGEN_MAX_RETRIES` | `3` | 单次 checker 生成内部最大尝试次数 |
-| `REVIEW_MAX_RETRIES` | `1` | LLM 复核失败后的重生成次数 |
-| `REVIEW_MAX_EVIDENCE_CHARS` | `20000` | 复核提示词最多携带的 evidence 字符数 |
+| `CODEGEN_MAX_RETRIES` | `3` | 单次 checker 生成最大尝试次数 |
+| `REVIEW_MAX_RETRIES` | `1` | 复核失败后的重新生成次数 |
+| `REVIEW_MAX_EVIDENCE_CHARS` | `20000` | 复核最多携带的 evidence 字符数 |
 | `CHECKER_TIMEOUT` | `30` | 单个 checker 最长执行秒数 |
-| `GENERATED_DIR` | `generated_checkers` | 全局 checker 缓存目录 |
+| `GENERATED_DIR` | `generated_checkers` | checker 缓存目录 |
 
-如果模型上下文只有 4096，启用 `--review` 时建议适当降低 `REVIEW_MAX_EVIDENCE_CHARS`，例如：
-
-```bash
-export REVIEW_MAX_EVIDENCE_CHARS=3000
-```
-
-或者提高 vLLM 的 `LOCAL_LLM_MAX_MODEL_LEN`，但要同步评估显存占用。
-
-## 11. 无模型环境的准确含义
-
-```bash
-python main.py --input <rules_matched.json> --no-generate
-```
-
-执行逻辑为：
-
-```text
-读取并校验 JSON
-  → evidence 为空：insufficient_input
-  → evidence 非空：计算 checker_key
-      ├── 缓存存在：直接执行 checker
-      └── 缓存不存在：记录 error
-  → 汇总报告
-```
-
-所以无模型环境不是“跳过审批”，而是“只能运行已生成的确定性 checker”。第一次运行、缓存为空时，
-有 evidence 的规则出现 `error` 是正常现象；先在服务器生成并验证 checker 后，后续才可以不启动模型运行。
-
-## 12. 测试
+## 8. 测试
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-当前测试使用真实的 `report_2` JSON，不包含手写业务 checker 或模拟审批数据。
+真实 `report_2` JSON/XLSX 测试只在对应文件存在时运行；本地没有这些私有样例时会标记为
+`skipped`，而不是伪造业务输入。PDF 存在时仍会验证真实页数和双页码。
 
-## 13. 安全边界
+## 9. 当前边界
 
-- 不调用外部 API，OpenAI SDK 只连接服务器本机 vLLM。
-- 生成代码禁止网络、文件读写、子进程和动态执行，并在执行前进行 AST 检查。
-- checker 在独立临时目录的限时子进程中执行。
-- 当前进程隔离不等于完整安全沙箱；正式生产应进一步使用禁网、只读文件系统、资源限额和非特权用户容器。
+- 支持带文本层的 PDF；扫描件 OCR 尚未接入，程序不会伪造提取原文；
+- 内容匹配是候选定位，不是最终违规判断；
+- 生成代码经过 AST 限制并在临时目录的限时子进程中执行，但这不等同于完整安全沙箱；
+- 生产部署仍建议使用禁网、只读文件系统、资源限额和非特权容器。
