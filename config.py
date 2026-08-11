@@ -19,15 +19,21 @@ class Settings:
     llm_model_path: str = os.getenv("LOCAL_LLM_MODEL_PATH", _DEFAULT_MODEL_DIR)
     llm_api_key: str = os.getenv("LOCAL_LLM_API_KEY", "EMPTY")
     llm_candidate_chars: int = int(os.getenv("LOCAL_LLM_CANDIDATE_CHARS", "1200"))
+    llm_timeout: float = float(os.getenv("LOCAL_LLM_TIMEOUT", "180"))
+    llm_max_connections: int = int(os.getenv("LOCAL_LLM_MAX_CONNECTIONS", "16"))
+
+    # —— 步骤三：短输出语义判定与并发 ——
+    semantic_workers: int = int(os.getenv("SEMANTIC_WORKERS", "4"))
+    matching_workers: int = int(os.getenv("MATCHING_WORKERS", "4"))
+    semantic_max_tokens: int = int(os.getenv("SEMANTIC_MAX_TOKENS", "768"))
+    semantic_max_retries: int = int(os.getenv("SEMANTIC_MAX_RETRIES", "1"))
+    semantic_max_evidence_chars: int = int(os.getenv("SEMANTIC_MAX_EVIDENCE_CHARS", "16000"))
+    semantic_max_chars_per_evidence: int = int(os.getenv("SEMANTIC_MAX_CHARS_PER_EVIDENCE", "8000"))
 
     # —— 语义相似度 embedding（步骤三可选；当前确定性 checker 不强制）——
     embed_model: str = os.getenv("LOCAL_EMBED_MODEL", "BAAI/bge-m3")
 
-    # —— 代码生成流水线（编写期）——
-    codegen_max_retries: int = int(os.getenv("CODEGEN_MAX_RETRIES", "3"))
-    generated_dir: str = os.getenv("GENERATED_DIR", "generated_checkers")
-    checker_timeout: int = int(os.getenv("CHECKER_TIMEOUT", "30"))
-    review_max_retries: int = int(os.getenv("REVIEW_MAX_RETRIES", "1"))
+    # —— 可选二次复核 ——
     review_max_evidence_chars: int = int(os.getenv("REVIEW_MAX_EVIDENCE_CHARS", "20000"))
 
 

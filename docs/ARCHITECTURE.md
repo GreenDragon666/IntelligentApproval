@@ -1,198 +1,89 @@
-# 架构说明
+# 系统架构
 
-## 1. 三个步骤
+## 三步边界
 
-| 步骤 | 目录 | 输入 | 输出 |
+| 步骤 | 包 | 输入 | 输出 |
 |---|---|---|---|
-| 一：目录提取 | `src/dir_extr/` | PDF/Office/纯文本、正文页码偏移 | `PageText`、目录、`DocumentSection` |
-| 二：内容匹配 | `src/cont_match/` | 章节、政策规则 JSON/XLSX | 带双页码 evidence 的 `MatchedCase` |
-| 三：代码生成与审批 | `src/code_gen/` | `MatchedCase` | checker、规则执行结果、审批报告 |
+| 一：目录提取 | `src/dir_extr/` | 招标文档 | 分页文本、页码、目录、章节 |
+| 二：内容匹配 | `src/cont_match/` | 章节、`--policy-rules` | `MatchedCase` / `rules_matched.json` |
+| 三：规则校验 | `src/rule_check/`、`src/engine.py` | `MatchedCase` | 判定缓存、审批报告 |
 
-目录结构直接表达业务步骤：
+步骤一、二的主要算法保持不变。步骤二新增两项职责：从规则表读取 `检查方式` 与
+`结构化数据展示字段`；并在启用 `--use-llm` 时并发重排候选章节。
 
-```text
-src/
-├── dir_extr/                   # 步骤一
-│   ├── documents.py            # 多格式分派与 Office 转换
-│   ├── pdf.py
-│   └── sections.py
-├── cont_match/                 # 步骤二
-│   ├── rules.py
-│   ├── retrieval.py
-│   ├── llm_matcher.py
-│   └── pipeline.py             # 串联步骤一、二，输出正式 JSON
-├── code_gen/                   # 步骤三
-│   ├── checker_store.py
-│   ├── graph.py
-│   ├── prompts.py
-│   ├── sandbox.py
-│   ├── reviewer.py
-│   └── report.py
-├── page_schema.py              # 步骤一、二共享
-├── rule_schema.py              # 步骤二、三共享
-├── llm.py                      # 步骤二、三共享
-└── engine.py                   # 案件审批编排
-```
-
-归类原则是“主要由哪个步骤调用，就放入哪个步骤；跨步骤使用才保留顶层”。因此：
-
-- `checker_store` 只负责第三步生成代码的持久化和复用；
-- `reviewer` 只复核第三步的 checker 结果；
-- `report` 只渲染第三步的审批结果；
-- `page_schema` 被目录提取和内容匹配共同使用；
-- `rule_schema` 是内容匹配输出与代码生成输入之间的稳定接口；
-- `llm` 被步骤二候选重排和步骤三 checker 生成/复核共同使用。
-
-## 2. 入口与编排层
-
-`main.py` 是用户统一入口。它不包含提取、匹配或审批算法，只负责选择运行范围和串联编排：
+## 步骤三路由
 
 ```text
-main.py --one_report_path <文档>
-  → 自动创建 reports/report_x 并复制输入文档
-  → cont_match.pipeline.prepare_case
-      → dir_extr
-      → cont_match
-      → 写 rules_matched.json
-  → engine.run_case
-      → code_gen checker 缓存/生成/执行/复核
-  → code_gen.report
-
-main.py --input rules_matched.json
-  → 跳过步骤一、二
-  → engine.run_case
-  → code_gen.report
-
-main.py --reports_path <目录>
-  → 递归发现所有支持文档
-  → 每个文档分配独立的 reports/report_x
-  → 对每个文档执行与单文件模式相同的三步流程
+MatchedRule.check_method
+  │
+  ├─ 包含“结构化数据检查”
+  │    → structured.py
+  │    → 解释规则公式
+  │    → 金额/比例/百分比/日期/关键词操作
+  │
+  └─ 其他检查方式
+       → semantic.py
+       → 本地 Qwen 短 JSON 判定
+       → quote/evidence_index/status/confidence 校验
 ```
 
-`prepare_case.py` 是步骤一、二的独立运行/排错入口；`gen_checker.py` 是单条规则的第三步生成/
-修复入口。它们不是单元测试，也不会替代正式统一入口 `main.py`。
+组合检查方式中只要含有 `结构化数据检查`，就走确定性执行器。这是当前明确的产品路由，不会在
+运行时让模型改写。
 
-`case_id` 仍是正式 JSON 内部契约字段，但不再由命令行传入。程序扫描既有 `report_x` 和旧式
-`reportx`，取最大编号加一，并把新目录名作为 `case_id`。失败案件保留已经分配的目录，避免
-后续任务覆盖其追溯信息。
+结构化执行器无法可靠取得所有必要操作数时返回 `insufficient_input`。这是业务输入缺失，不是
+流程异常，也不能当成规则通过。
 
-## 3. 步骤一：目录提取
+## 并发和 vLLM
 
-`dir_extr/documents.py` 是格式适配层：
+步骤二用 `ThreadPoolExecutor` 并发调用候选重排，步骤三并发执行各规则。结构化规则在本机快速
+完成，语义规则通过共享 OpenAI/httpx 连接池调用 vLLM。
 
-- PDF 直接进入现有提取器；
-- DOCX/DOCM 优先使用 LibreOffice 转 PDF，无转换器时解析 Word XML；
-- DOC/ODT/RTF/WPS 通过 LibreOffice 临时转 PDF；正式运行会保留为 `preprocessing/converted_source.pdf`；
-- TXT/Markdown 直接读取并按换页符形成逻辑页；
-- 输出统一的 `ExtractedDocument`，包含页文本、目录、提取方法和页码口径。
+默认并发：
 
-`dir_extr/pdf.py`：
+- `MATCHING_WORKERS=4`
+- `SEMANTIC_WORKERS=4`
 
-- 使用 PyMuPDF 逐真实 PDF 页抽取文本；
-- 依赖不可用时依次尝试 pypdf 和系统 `pdftotext`；
-- 保存 PDF 物理页；
-- 优先使用人工指定的 `document_page_1_pdf_page`；未指定时根据 PDF Page Labels 或连续页眉/页脚页码自动推断，再计算正文印刷页；
-- 提取 PDF 书签目录。
+语义判定固定 `/no_think`、`temperature=0`、短输出。静态系统提示放在共同前缀中，便于 vLLM
+前缀缓存；不同规则并发到达后可由 vLLM 连续批处理。
 
-`dir_extr/sections.py`：
+`src/llm.py` 的 httpx 客户端设置 `trust_env=False`，本机 vLLM 请求不会读取 SOCKS/HTTP 代理。
 
-- 优先按 PDF 书签切分；
-- 无书签时使用通用中文标题模式；
-- 长章节按最大页数切块；
-- 每个章节保留标题、完整原文和两套页码范围。
+## 缓存与回滚
 
-本步骤不包含政策规则、行业关键词或模型调用。
+`DecisionCache` 的摘要输入包括：
 
-## 4. 步骤二：内容匹配
+- 执行器版本；
+- 规则序号、原文、完整逻辑；
+- 检查方式、结构化字段；
+- 当前案件 evidence 及定位。
 
-`cont_match/rules.py` 从正式 JSON 或政策 XLSX 加载：
+因此缓存是案件判定缓存，不是全局规则代码缓存。规则或原文变化时自动产生新 key，不会误用旧
+结果。
 
-- 整数 `rule_id`；
-- `rule_raw`（重点排查情形）；
-- `rule_text`（触发逻辑公式）；
-- 只用于召回的辅助字段。
+`--force-recheck` 重写当前 key 前，会把旧结果复制到 `decision_cache/history/`；
+`--rollback-rules` 恢复指定规则最近一版历史。写入使用临时文件加原子替换，中断不会留下半个
+JSON。
 
-`cont_match/retrieval.py` 使用领域无关的字符级 TF-IDF 召回 top-k 章节；
-`cont_match/llm_matcher.py` 可把候选交给本地 Qwen3-8B 重排，也允许模型拒绝全部候选。
+## 输出验证
 
-`cont_match/pipeline.py::prepare_case` 是步骤二的生产入口，负责：
+语义判定必须返回：
 
-1. 调用目录提取；
-2. 加载规则并执行召回/重排；
-3. 转换为正式 `MatchedCase`；
-4. 写 `rules_matched.json` 和可追溯中间产物。
+- 合法 `status`；
+- 结论摘要；
+- 0～1 的置信度；
+- 缺失输入；
+- 违规/预警时至少一条 finding；
+- finding 的 `evidence_index` 不越界；
+- `quote` 是对应 evidence.text 中的连续原文。
 
-无模型时使用字符召回结果，适合链路测试；正式运行建议启用 Qwen 重排。模型失败默认降级并
-记录到 `matches.json`，`--strict-llm` 可改为立即终止。
+输出校验失败时只进行一次短 JSON 修正，不再生成或执行 Python。
 
-## 5. 步骤三：代码生成与审批
+## 旧版本兼容
 
-```text
-MatchedCase.rules[]
-  → evidence 为空：insufficient_input
-  → checker_store 按规则哈希查找 checker
-      ├── 已存在：复用
-      └── 不存在：graph 调用本地 Qwen3-8B 生成
-  → sandbox 静态检查、限时子进程执行、结果契约校验
-  → 可选 reviewer 复核
-      ├── 通过：进入报告
-      └── 不通过：只反馈并重生成当前规则
-  → report 输出 summary.json / summary.md
-```
+- 旧 `rules_matched.json` 没有 `check_method` 时按 `大模型分析` 读取。
+- 旧 JSON 使用 `--input` 时可同时传 `--policy-rules`，按 `rule_id` 补齐检查方式和结构化字段，不重跑步骤一、二。
+- `--no-generate` 是 `--no-llm-check` 的兼容别名。
+- `--force-regenerate` 是 `--force-recheck` 的兼容别名。
+- `--checker-dir` 是 `--check-cache-dir` 的兼容别名。
 
-`engine.py` 是案件级编排器：它管理规则选择、错误隔离、重生成和复核迭代；具体的第三步实现
-仍在 `code_gen/` 内。单条规则失败不会终止其他规则。
-
-## 6. 共享正式契约
-
-```text
-MatchedCase
-├── case_id
-├── source
-│   └── file
-└── rules[]
-    ├── rule_id: int
-    ├── rule_raw
-    ├── rule_text
-    └── evidence[]
-        ├── location
-        │   ├── file
-        │   ├── section
-        │   ├── pdf_pages
-        │   ├── document_pages
-        │   └── page_basis
-        └── text
-```
-
-该契约定义在 `src/rule_schema.py`。步骤二只能通过它输出，步骤三只依赖它消费，因此第三步
-不需要知道 PDF 如何拆分或候选如何召回。
-
-`page_basis` 取值为 `original_pdf`、`converted_pdf` 或 `logical_page`。为保持旧 JSON 兼容，
-缺少该字段时默认按 `original_pdf` 读取。
-
-## 7. Checker 复用
-
-规范化 `rule_text` 后计算 SHA-256：
-
-```text
-rule_<rule_id>_<digest前12位>.py
-```
-
-生成 checker 时只提供 `rule_id`、`rule_raw` 和 `rule_text`，不提供案件 evidence。运行时再把
-当前 `MatchedRule` 传入 checker。规则文本不变时可跨案件复用；规则变化时哈希自动变化。
-
-## 8. 模型边界
-
-步骤二和步骤三共享 `src/llm.py`，统一连接一个 Qwen3-8B vLLM 服务：
-
-- 步骤二：只做候选相关性重排；
-- 步骤三：生成 checker；
-- 步骤三可选：复核 checker 结果。
-
-程序不会自动启动 vLLM。服务地址、served model name 和 API key 由 `LOCAL_LLM_*` 配置。
-
-## 9. 安全边界
-
-生成代码先进行 AST 检查，再在临时目录的限时子进程中执行，并校验返回类型、`rule_id`、
-证据下标及引用原文。该进程隔离不是完整安全沙箱，生产部署仍应使用禁网、只读文件系统、
-资源限额和非特权用户容器。
+旧的按规则生成 Python checker 生产模块已移除，避免两个第三步实现并存。

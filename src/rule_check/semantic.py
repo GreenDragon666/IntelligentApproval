@@ -1,0 +1,127 @@
+"""使用服务器本地 Qwen 对非结构化规则直接作短输出、可回引的语义判定。"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+
+from config import settings
+from .. import llm
+from ..rule_schema import Finding, MatchedRule, RuleResult, Status
+
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_ALLOWED_STATUSES = {Status.VIOLATION, Status.WARNING, Status.PASS, Status.INSUFFICIENT_INPUT}
+
+SYSTEM_PROMPT = """你是招标文件合规审查器。严格依据给定规则和证据作答，不生成 Python 代码，不补充未提供的事实。
+必须返回一个 JSON 对象，不得输出 Markdown 或思考过程。JSON 字段：
+{"status":"violation|warning|pass|insufficient_input","summary":"简短结论","legal_basis":"规则中已有法规依据，无法确定则空字符串","findings":[{"evidence_index":0,"quote":"证据中的连续原文","reason":"该原文如何触发规则"}],"confidence":0到1,"missing_inputs":["缺失资料"]}
+要求：
+1. findings 中的 quote 必须逐字来自对应 evidence.text，不能改写。
+2. 证据不足以覆盖规则要求的文件、字段或比较对象时返回 insufficient_input，不能把缺失当作违规或通过。
+3. 没有明确命中时不得仅凭关键词判违规，必须结合上下文和规则条件。
+4. status=pass 时 findings 应为空；violation/warning 时至少提供一条可回引证据。
+5. 不得把 evidence 数组位置臆测为某类外部文件，只能使用 location 中明确提供的信息。"""
+
+
+@dataclass(frozen=True)
+class SemanticEvaluation:
+    result: RuleResult
+    attempts: int
+
+
+def _parse_json(raw: str) -> dict:
+    fenced = _JSON_BLOCK.search(raw)
+    if fenced:
+        value = json.loads(fenced.group(1).strip())
+        if isinstance(value, dict):
+            return value
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(raw):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(raw[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise ValueError("LLM 输出中没有可解析的 JSON 对象")
+
+
+def _payload(rule: MatchedRule) -> dict:
+    remaining = settings.semantic_max_evidence_chars
+    evidence_items = []
+    for index, evidence in enumerate(rule.evidence):
+        if remaining <= 0:
+            break
+        text = evidence.text[: min(len(evidence.text), remaining, settings.semantic_max_chars_per_evidence)]
+        remaining -= len(text)
+        evidence_items.append({
+            "evidence_index": index,
+            "location": {
+                "file": evidence.location.file,
+                "section": evidence.location.section,
+                "pdf_pages": [evidence.location.pdf_pages.start, evidence.location.pdf_pages.end],
+                "page_basis": evidence.location.page_basis,
+            },
+            "text": text,
+        })
+    return {
+        "rule_id": rule.rule_id,
+        "check_method": rule.check_method,
+        "rule_raw": rule.rule_raw,
+        "rule_text": rule.rule_text,
+        "evidence": evidence_items,
+    }
+
+
+def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
+    try:
+        status = Status(str(data["status"]).strip())
+    except Exception as exc:
+        raise ValueError(f"非法或缺失 status: {data.get('status')!r}") from exc
+    if status not in _ALLOWED_STATUSES:
+        raise ValueError(f"LLM 判定不允许返回 {status.value}")
+    findings = []
+    for item in data.get("findings") or []:
+        evidence_index = int(item["evidence_index"])
+        if evidence_index < 0 or evidence_index >= len(rule.evidence):
+            raise ValueError(f"evidence_index 越界: {evidence_index}")
+        quote = str(item.get("quote", "")).strip()
+        if not quote or quote not in rule.evidence[evidence_index].text:
+            raise ValueError("quote 不是对应 evidence.text 中的连续原文")
+        findings.append(Finding(evidence_index=evidence_index, quote=quote, reason=str(item.get("reason", "")).strip()))
+    if status in {Status.VIOLATION, Status.WARNING} and not findings:
+        raise ValueError(f"{status.value} 必须提供至少一条 finding")
+    if status == Status.PASS and findings:
+        raise ValueError("pass 不得包含 findings")
+    confidence = float(data.get("confidence", 0.0))
+    if confidence < 0 or confidence > 1:
+        raise ValueError("confidence 必须在 0 到 1 之间")
+    return RuleResult(
+        rule_id=rule.rule_id,
+        status=status,
+        summary=str(data.get("summary", "")).strip() or "本地模型未提供结论摘要。",
+        legal_basis=str(data.get("legal_basis", "")).strip(),
+        findings=findings,
+        metrics={"executor": "semantic_llm"},
+        confidence=confidence,
+        missing_inputs=[str(value).strip() for value in data.get("missing_inputs") or [] if str(value).strip()],
+    )
+
+
+def evaluate_semantic(rule: MatchedRule) -> SemanticEvaluation:
+    if not rule.evidence:
+        return SemanticEvaluation(RuleResult(rule_id=rule.rule_id, status=Status.INSUFFICIENT_INPUT, summary="未匹配到可供语义审查的原文。", confidence=1.0, missing_inputs=["招标文件相关原文"]), 0)
+    payload = json.dumps(_payload(rule), ensure_ascii=False, separators=(",", ":"))
+    last_error = ""
+    for attempt in range(1, settings.semantic_max_retries + 2):
+        correction = f"\n上一次输出校验失败：{last_error}\n请只修正 JSON。" if last_error else ""
+        prompt = f"/no_think\n请审查以下规则与证据。{correction}\n输入：{payload}"
+        try:
+            raw = llm.chat(prompt, system=SYSTEM_PROMPT, temperature=0.0, max_tokens=settings.semantic_max_tokens)
+            return SemanticEvaluation(_to_result(rule, _parse_json(raw)), attempt)
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+    raise RuntimeError(f"语义判定连续失败 {settings.semantic_max_retries + 1} 次：{last_error}")

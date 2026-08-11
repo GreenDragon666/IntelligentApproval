@@ -25,10 +25,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-score", type=float, default=0.03)
     parser.add_argument("--use-llm", action="store_true", help="步骤二使用本地模型重排")
     parser.add_argument("--strict-llm", action="store_true", help="步骤二模型失败即终止当前文档")
-    parser.add_argument("--review", action="store_true", help="步骤三启用 LLM 结果复核")
-    parser.add_argument("--no-generate", action="store_true", help="步骤三禁止生成缺失 checker")
-    parser.add_argument("--force-regenerate", action="store_true", help="步骤三忽略 checker 缓存")
-    parser.add_argument("--checker-dir", help="所有案件共用的 checker 缓存目录")
+    parser.add_argument("--match-workers", type=int, help="步骤二并发重排规则数")
+    parser.add_argument("--review", action="store_true", help="步骤三启用第二次 LLM 结果复核；会降低速度")
+    parser.add_argument("--no-llm-check", "--no-generate", dest="no_llm_check", action="store_true", help="步骤三禁用语义规则的 LLM 判定")
+    parser.add_argument("--force-recheck", "--force-regenerate", dest="force_recheck", action="store_true", help="步骤三忽略当前判定缓存重新检查")
+    parser.add_argument("--check-cache-dir", "--checker-dir", dest="check_cache_dir", help="案件判定缓存目录")
+    parser.add_argument("--check-workers", type=int, help="步骤三并发规则数")
+    parser.add_argument("--rollback-rules", nargs="*", type=int, help="恢复指定规则的上一版判定缓存")
     parser.add_argument("--rules", nargs="*", type=int, help="每个案件只执行指定规则序号")
     parser.add_argument("--continue-on-error", action="store_true", help="单个文档失败后继续处理；最终仍返回非零状态")
     return parser
@@ -36,13 +39,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _main_argv(args: argparse.Namespace) -> list[str]:
     argv = ["--reports_path", args.reports_path, "--policy-rules", args.policy_rules]
-    for value, option in ((args.document_page_1_pdf_page, "--document-page-1-pdf-page"), (args.max_section_pages, "--max-section-pages"), (args.candidate_count, "--candidate-count"), (args.evidence_count, "--evidence-count"), (args.minimum_score, "--minimum-score"), (args.checker_dir, "--checker-dir")):
+    for value, option in ((args.document_page_1_pdf_page, "--document-page-1-pdf-page"), (args.max_section_pages, "--max-section-pages"), (args.candidate_count, "--candidate-count"), (args.evidence_count, "--evidence-count"), (args.minimum_score, "--minimum-score"), (args.match_workers, "--match-workers"), (args.check_cache_dir, "--check-cache-dir"), (args.check_workers, "--check-workers")):
         if value is not None:
             argv.extend([option, str(value)])
     if args.rules:
         argv.append("--rules")
         argv.extend(str(rule_id) for rule_id in args.rules)
-    for enabled, option in ((args.use_llm, "--use-llm"), (args.strict_llm, "--strict-llm"), (args.review, "--review"), (args.no_generate, "--no-generate"), (args.force_regenerate, "--force-regenerate"), (args.continue_on_error, "--continue-on-error")):
+    if args.rollback_rules:
+        argv.append("--rollback-rules")
+        argv.extend(str(rule_id) for rule_id in args.rollback_rules)
+    for enabled, option in ((args.use_llm, "--use-llm"), (args.strict_llm, "--strict-llm"), (args.review, "--review"), (args.no_llm_check, "--no-llm-check"), (args.force_recheck, "--force-recheck"), (args.continue_on_error, "--continue-on-error")):
         if enabled:
             argv.append(option)
     return argv

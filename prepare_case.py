@@ -21,6 +21,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-score", type=float, default=0.03)
     parser.add_argument("--use-llm", action="store_true", help="用服务器本地 Qwen3-8B 重排字符级候选")
     parser.add_argument("--strict-llm", action="store_true", help="本地模型调用失败时终止")
+    parser.add_argument("--match-workers", type=int, help="并发重排规则数，默认读取 MATCHING_WORKERS")
     parser.add_argument("--continue-on-error", action="store_true", help="批量模式中单个文档失败后继续处理")
     return parser
 
@@ -28,7 +29,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _main_argv(args: argparse.Namespace) -> list[str]:
     argv = ["--preprocess-only", "--policy-rules", args.policy_rules]
     argv.extend(["--one_report_path", args.one_report_path] if args.one_report_path else ["--reports_path", args.reports_path])
-    for value, option in ((args.document_page_1_pdf_page, "--document-page-1-pdf-page"), (args.max_section_pages, "--max-section-pages"), (args.candidate_count, "--candidate-count"), (args.evidence_count, "--evidence-count"), (args.minimum_score, "--minimum-score")):
+    for value, option in ((args.document_page_1_pdf_page, "--document-page-1-pdf-page"), (args.max_section_pages, "--max-section-pages"), (args.candidate_count, "--candidate-count"), (args.evidence_count, "--evidence-count"), (args.minimum_score, "--minimum-score"), (args.match_workers, "--match-workers")):
         if value is not None:
             argv.extend([option, str(value)])
     for enabled, option in ((args.use_llm, "--use-llm"), (args.strict_llm, "--strict-llm"), (args.continue_on_error, "--continue-on-error")):

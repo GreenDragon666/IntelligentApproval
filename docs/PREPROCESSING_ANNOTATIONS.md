@@ -22,7 +22,7 @@ prepare_case.py::main
 |---|---|---|
 | `PageText` | 一页来源/转换/逻辑页的页码、标签和文本 | 文档提取 → 章节拆分 |
 | `DocumentSection` | 一个可匹配章节的标题、双页码范围和原文 | 章节拆分 → 候选召回/正式 evidence |
-| `PolicyRule` | 从政策表读出的整数序号、原文、逻辑和匹配提示 | 规则加载 → 候选召回/正式 rule |
+| `PolicyRule` | 从政策表读出的整数序号、原文、逻辑、检查方式、结构化字段和匹配提示 | 规则加载 → 候选召回/正式 rule |
 | `SectionCandidate` | 某规则与某章节及其字符级分数 | 召回 → Qwen 重排/调试产物 |
 | `MatchedCase` | 对外正式 JSON 契约 | 流水线最终输出 |
 
@@ -67,7 +67,7 @@ prepare_case.py::main
 |---|---|---|
 | `_first` | 从一组兼容列名中读取第一个非空值 | 支持中文政策表和正式 JSON 字段 |
 | `_rule_id` | 从序号单元格解析正整数，空值时用行号 | 最终仍由 `MatchedRule` 再校验 |
-| `_rows_to_rules` | 把通用行字典转换为 `PolicyRule`，收集匹配提示并检查重复编号 | 不读取旧 Excel 最后一列匹配原文 |
+| `_rows_to_rules` | 把通用行字典转换为 `PolicyRule`，读取“检查方式/结构化数据展示字段”、收集匹配提示并检查重复编号 | 不读取旧 Excel 最后一列匹配原文 |
 | `_load_json` | 接受规则数组或带 `rules` 数组的正式对象 | 可把无 evidence 的正式规则 JSON 再用于匹配 |
 | `_column_index` | 将 XLSX 单元格列字母转换为零基下标 | 供无 openpyxl 的 XML 读取器使用 |
 | `_load_xlsx` | 用 zip/XML 读取第一个工作表、共享字符串和单元格 | 重写了原 XLSX 读取思路，不保留 CSV 转换 |
@@ -142,4 +142,4 @@ prepare_case.py::main
 
 - 支持有文本层 PDF；扫描 PDF 当前明确报错，尚无通用 OCR 适配器。
 - 无模型模式是高召回候选模式，不能可靠拒绝“文件中没有相关内容”的规则。
-- `--use-llm` 只做章节相关性重排，不做最终合规判定；最终判定属于后续 checker 阶段。
+- `--use-llm` 只控制步骤二的章节相关性重排；最终判定由步骤三全局结构化执行器或语义 LLM 完成。

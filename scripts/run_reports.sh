@@ -1,4 +1,6 @@
-# bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 python main.py \
   --reports_path files/docs/ \

@@ -45,6 +45,8 @@ def select_candidates(
         "rule_id": rule.rule_id,
         "rule_raw": rule.rule_raw,
         "rule_text": rule.rule_text,
+        "check_method": rule.check_method,
+        "structured_fields": rule.structured_fields,
         "candidates": [
             {
                 "index": index,

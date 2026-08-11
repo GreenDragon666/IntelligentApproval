@@ -14,11 +14,12 @@ from ..page_schema import PolicyRule
 _ID_COLUMNS = ("序号", "rule_id", "规则序号")
 _RAW_COLUMNS = ("重点排查情形", "rule_raw", "规则原文", "规则描述")
 _TEXT_COLUMNS = ("触发逻辑公式", "rule_text", "规则逻辑描述")
+_METHOD_COLUMNS = ("检查方式", "check_method")
+_STRUCTURED_COLUMNS = ("结构化数据展示字段", "structured_fields")
 _HINT_COLUMNS = (
     "触发逻辑",
     "非结构化文件中模块",
     "非结构化文件",
-    "检查方式",
     "结构化数据展示字段",
     "章节",
     "关键词",
@@ -64,6 +65,8 @@ def _rows_to_rules(rows: list[dict[str, Any]]) -> list[PolicyRule]:
                 rule_id=_rule_id(_first(row, _ID_COLUMNS), row_number),
                 rule_raw=rule_raw,
                 rule_text=rule_text,
+                check_method=_first(row, _METHOD_COLUMNS) or "大模型分析",
+                structured_fields=_first(row, _STRUCTURED_COLUMNS),
                 match_hints=hints,
             )
         )

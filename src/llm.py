@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from config import settings
+
+
+@lru_cache(maxsize=8)
+def _client(base_url: str, api_key: str):
+    """复用线程安全连接池，并确保本机 vLLM 请求不受系统 SOCKS/HTTP 代理影响。"""
+    import httpx
+    from openai import OpenAI
+
+    transport = httpx.Client(trust_env=False, timeout=settings.llm_timeout, limits=httpx.Limits(max_connections=settings.llm_max_connections, max_keepalive_connections=settings.llm_max_connections))
+    return OpenAI(base_url=base_url, api_key=api_key, http_client=transport)
 
 
 def chat(
@@ -15,13 +27,8 @@ def chat(
     model: str | None = None,
     api_key: str | None = None,
 ) -> str:
-    """调用本地代码生成模型，返回文本。openai 包懒加载。"""
-    from openai import OpenAI
-
-    client = OpenAI(
-        base_url=base_url or settings.llm_base_url,
-        api_key=api_key or settings.llm_api_key,
-    )
+    """调用本地 Qwen vLLM，返回文本。OpenAI/httpx 客户端按配置复用。"""
+    client = _client(base_url or settings.llm_base_url, api_key or settings.llm_api_key)
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -37,9 +44,7 @@ def chat(
 
 def healthcheck() -> dict:
     """探测本地服务是否可达（不生成长文本）。失败抛异常。"""
-    from openai import OpenAI
-
-    client = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+    client = _client(settings.llm_base_url, settings.llm_api_key)
     models = client.models.list()
     ids = [m.id for m in models.data]
     return {

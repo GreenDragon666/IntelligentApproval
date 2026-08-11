@@ -40,6 +40,8 @@ class PolicyRule:
     rule_raw: str
     rule_text: str
     match_hints: list[str] = field(default_factory=list)
+    check_method: str = "大模型分析"
+    structured_fields: str = ""
 
     @property
     def query_text(self) -> str:

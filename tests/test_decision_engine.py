@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from src.engine import run_case
+from src.rule_check.semantic import SemanticEvaluation
+from src.rule_schema import EvidenceLocation, MatchedCase, MatchedEvidence, MatchedRule, PageRange, RuleResult, SourceDocument, Status
+
+
+class DecisionEngineTest(unittest.TestCase):
+    def _case(self) -> MatchedCase:
+        location = EvidenceLocation(file="test.pdf", section="章节", pdf_pages=PageRange(1, 1))
+        rule = MatchedRule(rule_id=1, rule_raw="语义规则", rule_text="判断是否明确", evidence=[MatchedEvidence(location, "内容明确。")], check_method="大模型分析")
+        return MatchedCase(case_id="report_1", source=SourceDocument("test.pdf"), rules=[rule])
+
+    @patch("src.engine.evaluate_semantic")
+    def test_success_is_cached_and_reused(self, evaluate) -> None:
+        evaluate.return_value = SemanticEvaluation(RuleResult(rule_id=1, status=Status.PASS, summary="通过", confidence=0.9), 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            first = run_case(self._case(), cache_dir=temporary, max_workers=2)
+            second = run_case(self._case(), cache_dir=temporary, max_workers=2)
+        self.assertFalse(first.rules[0].cached)
+        self.assertTrue(second.rules[0].cached)
+        self.assertEqual(evaluate.call_count, 1)
+
+    @patch("src.engine.evaluate_semantic")
+    def test_force_recheck_keeps_history_and_rollback_restores(self, evaluate) -> None:
+        evaluate.side_effect = [SemanticEvaluation(RuleResult(rule_id=1, status=Status.PASS, summary="第一版", confidence=0.8), 1), SemanticEvaluation(RuleResult(rule_id=1, status=Status.WARNING, summary="第二版", confidence=0.7), 1)]
+        with tempfile.TemporaryDirectory() as temporary:
+            run_case(self._case(), cache_dir=temporary)
+            run_case(self._case(), cache_dir=temporary, force_recheck=True)
+            restored = run_case(self._case(), cache_dir=temporary, rollback_rule_ids=[1])
+            self.assertTrue(list((Path(temporary) / "history").glob("*.json")))
+        self.assertEqual(restored.rules[0].result.summary, "第一版")
+
+    @patch("src.engine.evaluate_semantic")
+    def test_no_llm_diagnostic_does_not_poison_later_cache(self, evaluate) -> None:
+        evaluate.return_value = SemanticEvaluation(RuleResult(rule_id=1, status=Status.PASS, summary="模型已判定", confidence=0.9), 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            diagnostic = run_case(self._case(), cache_dir=temporary, enable_llm=False)
+            normal = run_case(self._case(), cache_dir=temporary, enable_llm=True)
+        self.assertEqual(diagnostic.rules[0].result.status, Status.INSUFFICIENT_INPUT)
+        self.assertEqual(normal.rules[0].result.summary, "模型已判定")
+        self.assertEqual(evaluate.call_count, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

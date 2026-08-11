@@ -1,14 +1,14 @@
-"""案件级流程：checker 复用/生成、执行、可选复核与定向迭代。"""
+"""案件级步骤三：全局结构化执行器、并发语义判定、缓存与可选复核。"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import settings
-from .code_gen.checker_store import CheckerStore, checker_key
-from .code_gen.graph import generate_checker
-from .code_gen.reviewer import review as review_result
-from .code_gen.sandbox import run_checker
+from .rule_check import DecisionCache, evaluate_semantic, evaluate_structured, is_structured_method
+from .rule_check.cache import decision_key
+from .rule_check.reviewer import review as review_result
 from .rule_schema import ApprovalReport, MatchedCase, MatchedRule, RuleResult, RuleRun, Status
 
 
@@ -19,126 +19,59 @@ def _failure(rule: MatchedRule, summary: str) -> RuleResult:
 def _select_rules(case: MatchedCase, rule_ids: Iterable[int] | None) -> list[MatchedRule]:
     if rule_ids is None:
         return case.rules
-    requested = list(rule_ids)
-    return [case.get_rule(rule_id) for rule_id in requested]
+    return [case.get_rule(rule_id) for rule_id in rule_ids]
 
 
-def _generate(
-    rule: MatchedRule,
-    store: CheckerStore,
-    feedback: str = "",
-    previous_code: str = "",
-) -> tuple[str | None, int, str]:
-    try:
-        state = generate_checker(
-            rule,
-            feedback=feedback,
-            store_root=str(store.root),
-            previous_code=previous_code,
-        )
-    except Exception as exc:
-        return None, 0, f"checker 生成流程异常: {exc!r}"
-    attempts = int(state.get("attempts", 0))
-    if not state.get("success"):
-        return None, attempts, state.get("error", "checker 生成失败")
-    return state.get("code", ""), attempts, ""
+def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force_recheck: bool, llm_review: bool, rollback: bool) -> RuleRun:
+    structured = is_structured_method(rule.check_method)
+    executor = "structured" if structured else "semantic_llm"
+    run = RuleRun(rule_id=rule.rule_id, rule_raw=rule.rule_raw, check_method=rule.check_method, executor=executor, cache_key=decision_key(rule))
 
+    if rollback:
+        if not cache.rollback(rule):
+            run.error = "没有可恢复的上一版判定缓存，已按当前配置重新执行。"
 
-def _run_one(
-    rule: MatchedRule,
-    *,
-    store: CheckerStore,
-    generate_missing: bool,
-    force_regenerate: bool,
-    llm_review: bool,
-) -> RuleRun:
-    run = RuleRun(rule_id=rule.rule_id, rule_raw=rule.rule_raw)
+    if not force_recheck:
+        cached = cache.load(rule)
+        if cached is not None:
+            run.result, metadata = cached
+            run.cached = True
+            run.attempts = int(metadata.get("attempts", 0))
+            if not llm_review:
+                return run
 
-    if not rule.evidence:
-        run.result = RuleResult(
-            rule_id=rule.rule_id,
-            status=Status.INSUFFICIENT_INPUT,
-            summary="未匹配到可供校验的原文。",
-        )
+    if run.result is None and not rule.evidence:
+        run.result = RuleResult(rule_id=rule.rule_id, status=Status.INSUFFICIENT_INPUT, summary="未匹配到可供校验的原文。", confidence=1.0, missing_inputs=["招标文件相关原文"])
+        cache.save(rule, run.result, executor=executor, attempts=0)
         return run
 
-    run.checker_key = checker_key(rule)
-
-    code: str | None = None
-    if store.exists(rule) and not force_regenerate:
-        code = store.load(rule)
-        run.checker_reused = True
-    elif generate_missing:
-        previous_code = store.load(rule) if store.exists(rule) else ""
-        code, attempts, error = _generate(rule, store, previous_code=previous_code)
-        run.generation_attempts += attempts
-        if error:
-            run.error = error
-            run.result = _failure(rule, "checker 生成失败。")
+    if run.result is None:
+        try:
+            if structured:
+                run.result = evaluate_structured(rule)
+            elif enable_llm:
+                evaluation = evaluate_semantic(rule)
+                run.result = evaluation.result
+                run.attempts = evaluation.attempts
+            else:
+                run.result = RuleResult(rule_id=rule.rule_id, status=Status.INSUFFICIENT_INPUT, summary="该规则需要本地 LLM 语义判定，但本次已禁用 LLM。", confidence=1.0, missing_inputs=["启用本地 LLM 语义判定"])
+                return run
+        except Exception as exc:
+            run.error = f"{executor} 执行失败: {type(exc).__name__}: {exc}"
+            run.result = _failure(rule, "规则校验执行失败。")
             return run
-    else:
-        run.error = f"未找到 checker: {run.checker_key}"
-        run.result = _failure(rule, "未找到可复用 checker，且本次禁止调用模型生成。")
-        return run
 
-    assert code is not None
-    result, error = run_checker(code, rule)
-    if error and generate_missing:
-        code, attempts, generation_error = _generate(
-            rule,
-            store,
-            feedback=f"真实输入执行失败：\n{error}",
-            previous_code=code,
-        )
-        run.generation_attempts += attempts
-        run.checker_reused = False
-        if generation_error:
-            run.error = generation_error
-            run.result = _failure(rule, "checker 执行失败，重新生成后仍未通过验证。")
-            return run
-        assert code is not None
-        result, error = run_checker(code, rule)
-
-    if error or result is None:
-        run.error = error or "checker 未返回结果"
-        run.result = _failure(rule, "checker 执行失败。")
-        return run
-    run.result = result
-
-    if not llm_review:
-        return run
-
-    for review_attempt in range(settings.review_max_retries + 1):
+    if llm_review and run.result is not None and enable_llm:
         try:
             run.review = review_result(rule, run.result)
         except Exception as exc:
-            run.error = f"LLM 复核失败: {exc!r}"
-            return run
-        if run.review.approved:
-            return run
-        if review_attempt >= settings.review_max_retries:
-            run.error = f"LLM 复核未通过且已达到迭代上限: {run.review.feedback}"
-            return run
-        if not generate_missing:
-            run.error = f"LLM 复核未通过: {run.review.feedback}"
-            return run
-        code, attempts, generation_error = _generate(
-            rule,
-            store,
-            feedback=run.review.feedback,
-            previous_code=code,
-        )
-        run.generation_attempts += attempts
-        run.checker_reused = False
-        if generation_error or code is None:
-            run.error = generation_error or "复核反馈后的 checker 生成失败"
-            return run
-        revised, execution_error = run_checker(code, rule)
-        if execution_error or revised is None:
-            run.error = execution_error or "修正后的 checker 未返回结果"
-            return run
-        run.result = revised
+            run.error = f"LLM 复核失败: {type(exc).__name__}: {exc}"
+        else:
+            if not run.review.approved:
+                run.error = f"LLM 复核未通过: {run.review.feedback}"
 
+    if not run.cached:
+        cache.save(rule, run.result, executor=executor, attempts=run.attempts, error=run.error)
     return run
 
 
@@ -146,20 +79,46 @@ def run_case(
     case: MatchedCase,
     *,
     rule_ids: Iterable[int] | None = None,
-    generate_missing: bool = True,
-    force_regenerate: bool = False,
+    enable_llm: bool = True,
+    force_recheck: bool = False,
     llm_review: bool = False,
+    cache_dir: str = "decision_cache",
+    max_workers: int | None = None,
+    rollback_rule_ids: Iterable[int] | None = None,
+    generate_missing: bool | None = None,
+    force_regenerate: bool | None = None,
     checker_dir: str | None = None,
 ) -> ApprovalReport:
-    store = CheckerStore(checker_dir)
-    runs = [
-        _run_one(
-            rule,
-            store=store,
-            generate_missing=generate_missing,
-            force_regenerate=force_regenerate,
-            llm_review=llm_review,
-        )
-        for rule in _select_rules(case, rule_ids)
-    ]
-    return ApprovalReport(case_id=case.case_id, source_file=case.source.file, rules=runs)
+    """执行步骤三；旧参数保留为兼容别名，不再生成案件专用 Python checker。"""
+    if generate_missing is not None:
+        enable_llm = generate_missing
+    if force_regenerate is not None:
+        force_recheck = force_regenerate
+    if checker_dir and cache_dir == "decision_cache":
+        cache_dir = checker_dir
+    selected = _select_rules(case, rule_ids)
+    rollback_ids = set(rollback_rule_ids or [])
+    unknown = rollback_ids - {rule.rule_id for rule in selected}
+    if unknown:
+        raise KeyError(f"回滚规则不在本次执行范围: {sorted(unknown)}")
+    cache = DecisionCache(cache_dir)
+    workers = max(1, max_workers or settings.semantic_workers)
+    runs: list[RuleRun | None] = [None] * len(selected)
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rule-check") as pool:
+        futures = {
+            pool.submit(_run_one, rule, cache=cache, enable_llm=enable_llm, force_recheck=force_recheck, llm_review=llm_review, rollback=rule.rule_id in rollback_ids): (index, rule)
+            for index, rule in enumerate(selected)
+        }
+        total = len(futures)
+        completed = 0
+        for future in as_completed(futures):
+            index, rule = futures[future]
+            try:
+                runs[index] = future.result()
+            except Exception as exc:
+                runs[index] = RuleRun(rule_id=rule.rule_id, rule_raw=rule.rule_raw, check_method=rule.check_method, executor="structured" if is_structured_method(rule.check_method) else "semantic_llm", cache_key=decision_key(rule), result=_failure(rule, "规则校验流程异常。"), error=f"未捕获流程异常: {type(exc).__name__}: {exc}")
+            completed += 1
+            interval = max(1, total // 10)
+            if completed == total or completed % interval == 0:
+                print(f"步骤三规则校验进度: {completed}/{total}", flush=True)
+    return ApprovalReport(case_id=case.case_id, source_file=case.source.file, rules=[run for run in runs if run is not None])

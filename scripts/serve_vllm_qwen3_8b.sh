@@ -14,6 +14,7 @@ HOST="${LLM_HOST:-127.0.0.1}"
 PORT="${LLM_PORT:-8001}"
 MAX_LEN="${LLM_MAX_MODEL_LEN:-16384}"
 GPU_UTIL="${LLM_GPU_MEM_UTIL:-0.9}"
+MAX_NUM_SEQS="${LLM_MAX_NUM_SEQS:-16}"
 EXTRA_ARGS=("$@")
 
 if [[ ! -d "$MODEL_PATH" ]]; then
@@ -35,6 +36,8 @@ echo "  model path : $MODEL_PATH"
 echo "  served name: $SERVED_NAME"
 echo "  endpoint   : http://${HOST}:${PORT}/v1"
 echo "  max len    : $MAX_LEN"
+echo "  max seqs   : $MAX_NUM_SEQS"
+echo "  cuda visible: $CUDA_VISIBLE_DEVICES"
 
 exec "$VLLM" serve "$MODEL_PATH" \
   --served-model-name "$SERVED_NAME" \
@@ -42,5 +45,7 @@ exec "$VLLM" serve "$MODEL_PATH" \
   --port "$PORT" \
   --max-model-len "$MAX_LEN" \
   --gpu-memory-utilization "$GPU_UTIL" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --enable-prefix-caching \
   --trust-remote-code \
   "${EXTRA_ARGS[@]}"

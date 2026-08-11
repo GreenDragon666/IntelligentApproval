@@ -1,134 +1,110 @@
 # 招标文件智能合规审批
 
-本项目把完整流程拆成三个边界清晰的步骤，同时提供一个统一入口：
+系统保持“目录提取 → 内容匹配 → 规则校验”三步结构。规则始终由 `--policy-rules` 指定的
+JSON/XLSX 提供；第三步读取同一行的“检查方式”，不再让大模型运行时生成 Python checker。
 
-1. 从 PDF、DOC、DOCX 等招标文档提取逐页文本、目录和章节；
-2. 将政策规则与招标章节匹配，生成约定的 `rules_matched.json`；
-3. 为规则生成并复用 Python checker，执行审批并输出报告。
-
-所有模型调用统一连接服务器本地的 Qwen3-8B vLLM，不调用外部模型 API。模型服务由用户
-手动启动，程序不会在运行时自动加载模型。
-
-## 1. 代码结构
-
-```text
-src/
-├── dir_extr/                   # 步骤一：多格式文档、目录、章节
-│   ├── documents.py            # 格式分派、Office 转 PDF、DOCX 降级
-│   ├── pdf.py
-│   └── sections.py
-├── cont_match/                 # 步骤二：规则读取、召回、LLM 重排
-│   ├── rules.py
-│   ├── retrieval.py
-│   ├── llm_matcher.py
-│   └── pipeline.py             # 串联步骤一、二并输出正式 JSON
-├── code_gen/                   # 步骤三：checker 生成到报告
-│   ├── checker_store.py        # checker 哈希、保存与复用
-│   ├── graph.py                # 生成、验证、失败重试状态图
-│   ├── prompts.py
-│   ├── sandbox.py              # 静态检查与限时子进程执行
-│   ├── reviewer.py             # 可选 LLM 复核
-│   └── report.py               # JSON/Markdown 报告
-├── page_schema.py              # 步骤一、二共享的内部数据结构
-├── engine.py                   # 案件审批总编排
-├── llm.py                      # 步骤二、三共用的本地模型客户端
-└── rule_schema.py              # 步骤二输出、步骤三输入的正式契约
-
-main.py                         # 三步统一入口，也支持从中间结果开始
-prepare_case.py                 # 步骤一、二独立运行/排错入口
-gen_checker.py                  # 单条规则 checker 生成/修复入口
-scripts/run_batch.py            # 多案件批量完整运行
-```
-
-`checker_store.py`、`reviewer.py` 和 `report.py` 都只被第三步使用，因此归入 `code_gen/`。
-`llm.py` 同时服务内容匹配和 checker 生成；`rule_schema.py` 横跨步骤二、三；
-`page_schema.py` 横跨步骤一、二，所以保留在 `src/` 顶层。步骤一、二的生产串联逻辑属于
-内容匹配的输出阶段，因此放在 `cont_match/pipeline.py`，不再额外保留 `preprocessing.py`。
-
-更详细的依赖和数据流见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。逐函数说明见
-[docs/PREPROCESSING_ANNOTATIONS.md](docs/PREPROCESSING_ANNOTATIONS.md)。同伴原始代码及标注保留在
-`references/stage1+2/`，不进入生产调用链。`reports/` 仅由程序自动生成案件产物。
-
-## 2. 完整数据流
+## 1. 当前架构
 
 ```text
 招标文档（PDF/DOC/DOCX/ODT/RTF/WPS/TXT/MD）
   │
   ▼
-步骤一 dir_extr
-  逐页文本 + 页码口径 + 正文印刷页 + 章节
+步骤一 src/dir_extr
+  文本、目录、章节、物理页/文件内页码
   │
   ▼
-步骤二 cont_match  ◀── 政策规则 JSON/XLSX
-  字符级 TF-IDF 召回 + 可选 Qwen3-8B 重排
+步骤二 src/cont_match  ◀── --policy-rules 规则 JSON/XLSX
+  字符召回 + 可选并发 Qwen 重排
   │
   ▼
-rules_matched.json
+rules_matched.json（包含 check_method、structured_fields）
   │
   ▼
-步骤三 code_gen
-  checker 缓存/生成 → 子进程执行 → 可选复核 → 审批报告
+步骤三 src/rule_check
+  ├─ 检查方式包含“结构化数据检查” → 全局确定性执行器
+  └─ 其他检查方式                → 并发 Qwen 语义判定
+  │
+  ▼
+decision_cache + summary.json + summary.md
 ```
 
-步骤一、二负责定位原文，不直接判定违规。步骤三的 checker 才根据规则和已匹配 evidence
-给出 `violation`、`warning`、`pass`、`insufficient_input` 或 `error`。
+代码布局：
 
-正式 JSON 契约见 [docs/MATCHED_JSON.md](docs/MATCHED_JSON.md)。关键约束是：
+```text
+src/
+├── dir_extr/                # 步骤一：多格式提取、页码、章节
+├── cont_match/              # 步骤二：规则读取、召回、LLM 重排
+├── rule_check/              # 步骤三：全局执行器、语义判定、缓存、报告
+│   ├── methods.py           # 规范化“检查方式”并路由
+│   ├── structured.py        # 金额/比例/日期/关键词等确定性操作
+│   ├── semantic.py          # 短 JSON 语义判定
+│   ├── cache.py             # 中断续跑、历史版本、回滚
+│   ├── reviewer.py          # 可选第二次 LLM 复核
+│   └── report.py
+├── engine.py                # 并发执行步骤三
+├── llm.py                   # vLLM 连接池，直连本机且不读取代理
+├── page_schema.py
+└── rule_schema.py
 
-- `rule_id` 是规则整数序号；
-- `rule_raw` 对应政策表“重点排查情形”；
-- `source` 只包含 `file`；
-- `evidence.location` 同时保存来源页、页码口径和正文印刷页；
-- checker 生成时不向模型提供某个案件的 evidence，确保相同规则可跨案件复用。
-
-### 2.1 支持的招标文件格式
-
-| 格式 | 提取方式 | 页码口径 |
-|---|---|---|
-| PDF | PyMuPDF，失败时降级 pypdf/pdftotext | `original_pdf`，原始 PDF 物理页 |
-| DOCX/DOCM | 优先 LibreOffice 转 PDF；不可用时解析 Word XML | `converted_pdf` 或 `logical_page` |
-| DOC/ODT/RTF/WPS | LibreOffice 临时转 PDF | `converted_pdf` |
-| TXT/Markdown | UTF-8/GB18030 直接读取，换页符切页 | `logical_page` |
-
-服务器处理 Office 文档前建议安装 LibreOffice，并确认以下命令至少一个可用：
-
-```bash
-libreoffice --version
-# 或
-soffice --version
+main.py                      # 完整/分阶段统一入口
+prepare_case.py              # 只运行步骤一、二
+scripts/run_batch.py         # 批量入口
 ```
 
-转换只发生在临时目录，`reports/report_x/` 内保留原始输入文件。DOCX 无 LibreOffice 时仍能降级
-提取段落和表格，但只有文档中的显式分页符可以形成可靠逻辑页；旧 `.doc` 等格式没有该降级能力。
+旧的案件专用代码生成模块和 `gen_checker.py` 已从生产框架移除。历史判定回滚由
+`decision_cache/history/` 提供。
 
-## 3. 启动 Qwen3-8B vLLM
+## 2. “检查方式”路由
 
-先在模型服务终端进入项目环境，然后设置服务端变量：
+规则表仍通过现有参数传入：
 
 ```bash
-export LLM_CUDA_VISIBLE_DEVICES=0,1,2,3
-export LLM_MODEL_PATH="/home/zyl/public/LLM Library/Qwen3-8B"
+--policy-rules /path/to/规则.xlsx
+```
+
+读取列包括：
+
+- `序号` → `rule_id`
+- `重点排查情形` → `rule_raw`
+- `触发逻辑公式` → `rule_text`
+- `检查方式` → `check_method`
+- `结构化数据展示字段` → `structured_fields`
+
+当前路由规则非常明确：只要“检查方式”的组合中包含 `结构化数据检查`，就走全局确定性执行器；
+其他方法，包括关键词匹配、大模型分析、政策库匹配及其组合，走本地 Qwen 语义判定。
+
+例如：
+
+| 检查方式 | 执行器 |
+|---|---|
+| `结构化数据检查` | `structured` |
+| `结构化数据检查+大模型分析` | `structured` |
+| `关键词匹配+大模型分析` | `semantic_llm` |
+| `大模型分析` | `semantic_llm` |
+| `政策库匹配+大模型分析` | `semantic_llm` |
+
+确定性执行器是全局代码，不按案件、规则生成 Python。它从规则公式和字段说明中解释可复用操作，
+当前覆盖金额、金额比例、百分比、日期区间和公式关键词。所需字段无法从证据中可靠提取时返回
+`insufficient_input`，不会猜测为违规或通过。
+
+## 3. 启动 vLLM
+
+单张物理 GPU 3：
+
+```bash
+export LLM_CUDA_VISIBLE_DEVICES=3
+export LLM_MODEL_PATH="/home/zyl/LLM Library/Qwen3-8B"
 export LLM_MODEL=Qwen3-8B
 export LLM_HOST=127.0.0.1
 export LLM_PORT=8001
 export LLM_MAX_MODEL_LEN=16384
 export LLM_GPU_MEM_UTIL=0.9
+export LLM_MAX_NUM_SEQS=16
 
-bash scripts/serve_vllm_qwen3_8b.sh --tensor-parallel-size 4
-```
-
-如果只用一张指定 GPU，例如物理 GPU 2：
-
-```bash
-export LLM_CUDA_VISIBLE_DEVICES=2
 bash scripts/serve_vllm_qwen3_8b.sh --tensor-parallel-size 1
 ```
 
-`LLM_MAX_MODEL_LEN` 是单次请求允许的最大上下文长度，越大 KV cache 显存开销越高；
-`LLM_GPU_MEM_UTIL` 是 vLLM 可使用的每张可见 GPU 显存比例。当前默认值 `16384` 和 `0.9`
-适合先在已跑通的服务器配置上使用；如果启动时显存不足，优先降低最大长度或显存比例。
-
-另开业务程序终端设置客户端变量：
+业务终端：
 
 ```bash
 export LOCAL_LLM_BASE_URL=http://127.0.0.1:8001/v1
@@ -138,238 +114,169 @@ export LOCAL_LLM_API_KEY=EMPTY
 python -c "from src.llm import healthcheck; print(healthcheck())"
 ```
 
-服务端 `LLM_MODEL` 与客户端 `LOCAL_LLM_MODEL` 必须一致；服务端 `LLM_PORT` 与
-`LOCAL_LLM_BASE_URL` 中的端口也必须一致。
+`src/llm.py` 使用复用连接池并设置 `trust_env=False`，连接本机 vLLM 时不会误用服务器上的
+SOCKS/HTTP 代理。
 
-| 位置 | 变量 | 默认值/作用 |
-|---|---|---|
-| 服务脚本 | `LLM_MODEL_PATH` | 必填，Qwen3-8B 权重目录 |
-| 服务脚本 | `LLM_MODEL` | `Qwen3-8B`，vLLM served model name |
-| 服务脚本 | `LLM_CUDA_VISIBLE_DEVICES` | `0,1,2,3`，指定服务可见 GPU |
-| 服务脚本 | `LLM_HOST` / `LLM_PORT` | `127.0.0.1` / `8001` |
-| 服务脚本 | `LLM_MAX_MODEL_LEN` | `16384` |
-| 服务脚本 | `LLM_GPU_MEM_UTIL` | `0.9` |
-| Python 客户端 | `LOCAL_LLM_BASE_URL` | `http://localhost:8001/v1` |
-| Python 客户端 | `LOCAL_LLM_MODEL` | `Qwen3-8B` |
-| Python 客户端 | `LOCAL_LLM_CANDIDATE_CHARS` | `1200`，每个匹配候选最多发送的字符数 |
-
-## 4. 一条命令运行完整流程
-
-vLLM 启动并通过健康检查后，运行：
+## 4. 完整运行
 
 ```bash
 python main.py \
-  --one_report_path /incoming/招标文件2.docx \
-  --policy-rules /path/to/policy_rules.xlsx \
+  --one_report_path files/docs/招标文件2.pdf \
+  --policy-rules files/规则.xlsx \
   --use-llm \
   --strict-llm
 ```
 
-这个入口依次完成目录提取、内容匹配、checker 生成/复用、执行和报告输出。`--use-llm`
-控制步骤二是否用 Qwen 重排；步骤三在缺少 checker 时默认会使用同一个 Qwen3-8B 服务生成代码。
-需要额外复核 checker 结果时增加 `--review`。
+`--use-llm` 仍只控制步骤二的候选重排。步骤三中，非结构化规则默认使用本地 Qwen 判定；如只想
+测试确定性结构化规则，可增加 `--no-llm-check`。
 
-程序不接收 `case_id`。它扫描 `reports/` 中已有的 `report_x`（同时兼容旧式 `reportx`），
-自动创建最大编号加一的目录，并把输入文档复制进去。默认产物结构：
-
-```text
-reports/report_2/
-├── 招标文件2.docx
-├── matched/
-│   └── rules_matched.json
-├── preprocessing/
-│   ├── converted_source.pdf    # Office 文档转换后保留，PDF/TXT 时没有
-│   ├── outline.json
-│   ├── sections.json
-│   ├── matches.json
-│   └── manifest.json
-└── results/
-    ├── summary.json
-    └── summary.md
-
-generated_checkers/
-├── rule_<rule_id>_<hash>.py
-└── rule_<rule_id>_<hash>.json
-```
-
-`--document-page-1-pdf-page` 是可选的人工覆盖参数。不传时，程序同时检查 PDF Page Labels
-和 PyMuPDF 页眉/页脚中至少连续 3 页的递增印刷页码；两者一致时置信度最高，冲突时采用实际
-可见的页眉/页脚页码，并自动计算正文第 1 页对应的
-PDF 物理页。检测结果、置信度和观察依据写入 `preprocessing/manifest.json`；无法可靠识别时
-`document_pages` 保持 `null`。
-
-显式传入 `--document-page-1-pdf-page 9` 时仍始终使用人工值，表示原始 PDF 或 Office 转换后
-PDF 的第 9 页对应正文印刷第 1 页。`evidence.location.page_basis` 会继续区分原始 PDF、转换
-PDF 和逻辑页，避免不同口径混用。
-
-## 5. 分阶段运行与排错
-
-### 5.1 单独运行步骤一、二
-
-```bash
-python prepare_case.py \
-  --one_report_path /incoming/招标文件2.docx \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
-  --use-llm \
-  --strict-llm
-```
-
-也可以用统一入口运行到步骤二后停止：
-
-```bash
-python main.py \
-  --one_report_path /incoming/招标文件2.docx \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
-  --use-llm \
-  --strict-llm \
-  --preprocess-only
-```
-
-不传 `--use-llm` 时只使用字符级召回，不访问模型。这适合验证页码、章节和 JSON 链路；
-正式匹配建议使用 Qwen 重排，使模型可以拒绝所有无关候选。默认情况下模型失败会记录后降级，
-`--strict-llm` 则要求任何匹配模型失败都终止。
-
-### 5.2 从已有 JSON 单独运行步骤三
-
-```bash
-python main.py --input reports/report_2/matched/rules_matched.json
-```
-
-只执行指定规则：
-
-```bash
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 3 4
-```
-
-严格无模型诊断模式：
-
-```bash
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --no-generate
-```
-
-无模型模式仍会执行已有 checker；没有缓存的规则会明确记录为 `error`，空 evidence 会记录为
-`insufficient_input`。如果同时传 `--review`，复核仍会访问模型。
-
-### 5.3 生成或修复单条 checker
-
-```bash
-python gen_checker.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rule-id 2
-
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --no-generate
-```
-
-`prepare_case.py` 和 `gen_checker.py` 都是可直接运行的分阶段运维/排错入口，不是单元测试。
-正式整案运行仍以 `main.py` 为准。
-
-### 5.4 批量运行多个案件
-
-`--reports_path` 会递归查找输入目录中所有受支持文档，其他文件自动跳过。启动 vLLM 后运行：
+批量运行：
 
 ```bash
 python scripts/run_batch.py \
-  --reports_path /incoming/tenders \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
-  --use-llm \
-  --strict-llm
-```
-
-默认任一案件失败就停止。希望继续处理后续案件并在最后汇总失败项时增加：
-
-```bash
-python scripts/run_batch.py \
-  --reports_path /incoming/tenders \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
+  --reports_path files/docs \
+  --policy-rules files/规则.xlsx \
   --use-llm \
   --strict-llm \
   --continue-on-error
 ```
 
-也可以直接使用统一入口：
+## 5. 性能配置
+
+步骤二和步骤三都并发向 vLLM 发请求，使 vLLM 能进行连续批处理。默认并发数均为4：
+
+```bash
+export MATCHING_WORKERS=4
+export SEMANTIC_WORKERS=4
+```
+
+也可按本次任务覆盖：
 
 ```bash
 python main.py \
-  --reports_path /incoming/tenders \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
+  --one_report_path files/docs/招标文件2.pdf \
+  --policy-rules files/规则.xlsx \
   --use-llm \
-  --strict-llm
+  --match-workers 6 \
+  --check-workers 6
 ```
 
-每个文档会单独生成新的 `reports/report_x/`。批量脚本调用同一个 `main.py`，因此单文件和批量
-行为保持一致。不要把待解析文档放进自动输出的 `reports/` 目录。
+建议从4开始。若 vLLM 日志长期显示 `Waiting` 很多或单请求延迟明显上升，再降低；如果仍始终只有
+`Running: 1` 且显存充足，可逐步提高到6或8。
 
-## 6. Checker 缓存、定位和重新生成
+服务脚本默认设置 `--max-num-seqs 16` 并启用 prefix caching，足以容纳业务端4～8路并发；
+`LLM_MAX_NUM_SEQS` 只是服务端并发上限，实际并发仍由 `MATCHING_WORKERS`/`SEMANTIC_WORKERS` 控制。
 
-系统对规范化后的 `rule_text` 计算 SHA-256，并生成：
+步骤三语义输出使用 `/no_think`，默认最多768 token，并只允许一次格式修正重试：
+
+| 环境变量 | 默认值 | 作用 |
+|---|---:|---|
+| `MATCHING_WORKERS` | `4` | 步骤二并发重排数 |
+| `SEMANTIC_WORKERS` | `4` | 步骤三并发语义判定数 |
+| `SEMANTIC_MAX_TOKENS` | `768` | 单条判定最大输出 |
+| `SEMANTIC_MAX_RETRIES` | `1` | JSON/引用校验失败后的重试次数 |
+| `SEMANTIC_MAX_EVIDENCE_CHARS` | `16000` | 单规则发送的证据字符总量 |
+| `LOCAL_LLM_MAX_CONNECTIONS` | `16` | HTTP 连接池上限 |
+| `LOCAL_LLM_TIMEOUT` | `180` | 单次请求超时秒数 |
+
+`--review` 会对每条结果再调用一次模型，默认不要开启；它用于抽查或高风险任务，而不是常规加速路径。
+
+## 6. 中断续跑、重检和回滚
+
+每个案件默认生成：
 
 ```text
-rule_<rule_id>_<规则哈希前12位>
+reports/report_5/
+├── 招标文件2.pdf
+├── matched/rules_matched.json
+├── preprocessing/
+├── decision_cache/
+│   ├── rule_<id>_<digest>.json
+│   └── history/
+└── results/
+    ├── summary.json
+    └── summary.md
 ```
 
-报告中的 `checker_key` 可直接定位 `generated_checkers/` 下的 `.py` 代码和 `.json` 元数据。
-规则内容变化时哈希也变化，不会误用旧规则的 checker。
-
-人工重新生成第 2 条规则：
-
-```bash
-python gen_checker.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rule-id 2 \
-  --feedback "这里填写人工发现的问题" \
-  --force
-```
-
-或者直接在案件入口中忽略缓存：
+从已有步骤二结果继续：
 
 ```bash
 python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --force-regenerate
+  --input reports/report_5/matched/rules_matched.json \
+  --policy-rules files/规则.xlsx
 ```
 
-checker 在真实 evidence 上执行异常时，`engine.py` 会把错误反馈给模型，只重生成当前规则；
-传入 `--review` 后，复核不通过也只迭代当前规则。其他规则不受影响。
+已经成功完成的规则会按“规则内容 + 检查方式 + evidence”哈希复用，只有缺失或变化的规则重新执行。
+为旧版 JSON 同时传入 `--policy-rules` 时，程序按 `rule_id` 补齐最新“检查方式”和“结构化数据展示字段”，
+不会重跑目录提取和内容匹配；新版 JSON 已自带这两个字段，仍建议传入以应用规则表中的最新路由。
 
-当前同一 `checker_key` 的重新生成会覆盖原 `.py/.json`，尚未实现内置历史版本与一键回滚。
-需要恢复上一版时，应依赖 Git、服务器快照或人工备份；“重新生成”不等同于“恢复旧版本”。
+只重检部分规则：
 
-## 7. 常用配置
+```bash
+python main.py \
+  --input reports/report_5/matched/rules_matched.json \
+  --rules 2 3 9 \
+  --force-recheck
+```
 
-| 环境变量 | 默认值 | 含义 |
+强制重检前的结果会自动写入 `decision_cache/history/`。恢复指定规则上一版本：
+
+```bash
+python main.py \
+  --input reports/report_5/matched/rules_matched.json \
+  --rules 2 3 \
+  --rollback-rules 2 3
+```
+
+旧参数仍兼容：`--no-generate` 等价于 `--no-llm-check`，`--force-regenerate` 等价于
+`--force-recheck`，`--checker-dir` 等价于 `--check-cache-dir`。
+
+## 7. 分阶段运行
+
+只运行步骤一、二：
+
+```bash
+python prepare_case.py \
+  --one_report_path files/docs/招标文件2.pdf \
+  --policy-rules files/规则.xlsx \
+  --use-llm \
+  --strict-llm \
+  --match-workers 4
+```
+
+或：
+
+```bash
+python main.py \
+  --one_report_path files/docs/招标文件2.pdf \
+  --policy-rules files/规则.xlsx \
+  --use-llm \
+  --preprocess-only
+```
+
+只运行步骤三：
+
+```bash
+python main.py --input reports/report_5/matched/rules_matched.json --policy-rules files/规则.xlsx
+```
+
+## 8. 支持的招标文档
+
+| 格式 | 提取方式 | 页码口径 |
 |---|---|---|
-| `CODEGEN_MAX_RETRIES` | `3` | 单次 checker 生成最大尝试次数 |
-| `REVIEW_MAX_RETRIES` | `1` | 复核失败后的重新生成次数 |
-| `REVIEW_MAX_EVIDENCE_CHARS` | `20000` | 复核最多携带的 evidence 字符数 |
-| `CHECKER_TIMEOUT` | `30` | 单个 checker 最长执行秒数 |
-| `GENERATED_DIR` | `generated_checkers` | checker 缓存目录 |
+| PDF | PyMuPDF，失败时 pypdf/pdftotext | 原始 PDF 物理页 |
+| DOCX/DOCM | LibreOffice 转 PDF；不可用时解析 Word XML | 转换 PDF 页或逻辑页 |
+| DOC/ODT/RTF/WPS | LibreOffice 转 PDF | 转换 PDF 页 |
+| TXT/Markdown | UTF-8/GB18030，换页符切页 | 逻辑页 |
 
-## 8. 测试
+Office 文档建议在服务器安装 LibreOffice。转换后的 PDF 会保留在
+`reports/report_x/preprocessing/converted_source.pdf`。
+
+## 9. 测试
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-真实 `report_2` JSON/XLSX 测试只在对应文件存在时运行；本地没有这些私有样例时会标记为
-`skipped`，而不是伪造业务输入。PDF 存在时仍会验证真实页数和双页码。
-
-## 9. 当前边界
-
-- 支持 PDF、常见 Office 文档和纯文本；扫描件 OCR 尚未接入，程序不会伪造提取原文；
-- DOC/ODT/RTF/WPS 依赖系统 LibreOffice；DOCX 无 LibreOffice 时只提供逻辑页降级；
-- 内容匹配是候选定位，不是最终违规判断；
-- 生成代码经过 AST 限制并在临时目录的限时子进程中执行，但这不等同于完整安全沙箱；
-- 生产部署仍建议使用禁网、只读文件系统、资源限额和非特权容器。
+测试覆盖检查方式路由、旧 JSON 兼容、确定性金额/日期规则、LLM JSON 与原文引用校验、步骤二
+并发、判定缓存、强制重检和回滚。

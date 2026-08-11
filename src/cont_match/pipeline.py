@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from config import settings
 from ..rule_schema import (
     EvidenceLocation,
     MatchedCase,
@@ -75,6 +77,7 @@ def prepare_case(
     minimum_score: float = 0.03,
     use_llm: bool = False,
     strict_llm: bool = False,
+    match_workers: int | None = None,
 ) -> MatchedCase:
     """生成可直接交给 ``main.py`` 的正式 ``rules_matched.json``。
 
@@ -91,6 +94,8 @@ def prepare_case(
         raise ValueError("evidence_count 不得大于 candidate_count")
     if minimum_score < 0:
         raise ValueError("minimum_score 不得小于 0")
+    if match_workers is not None and match_workers < 1:
+        raise ValueError("match_workers 必须大于 0")
 
     report = Path(report_path)
     output = Path(output_path)
@@ -115,36 +120,44 @@ def prepare_case(
     matched_rules: list[MatchedRule] = []
     match_artifacts: list[dict[str, Any]] = []
 
-    for rule in policy_rules:
-        candidates = matcher.rank(rule, top_k=candidate_count)
-        selected = _lexical_selection(
-            candidates,
-            evidence_count=evidence_count,
-            minimum_score=minimum_score,
-        )
-        selection_method = "lexical"
-        llm_error = ""
-        if use_llm and candidates:
-            try:
-                selected = select_candidates(
-                    rule,
-                    candidates,
-                    max_selected=evidence_count,
-                )
-                selection_method = "local_qwen"
-            except Exception as exc:
-                llm_error = f"{type(exc).__name__}: {exc}"
-                if strict_llm:
-                    raise RuntimeError(
-                        f"规则 {rule.rule_id} 的本地 LLM 匹配失败: {llm_error}"
-                    ) from exc
-                selection_method = "lexical_fallback"
+    ranked = [(rule, matcher.rank(rule, top_k=candidate_count)) for rule in policy_rules]
+    selections: dict[int, tuple[list[SectionCandidate], str, str]] = {}
+    for rule, candidates in ranked:
+        selections[rule.rule_id] = (_lexical_selection(candidates, evidence_count=evidence_count, minimum_score=minimum_score), "lexical", "")
+    if use_llm:
+        workers = max(1, match_workers or settings.matching_workers)
+        errors: list[tuple[int, Exception]] = []
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="content-match") as pool:
+            futures = {pool.submit(select_candidates, rule, candidates, max_selected=evidence_count): (rule, candidates) for rule, candidates in ranked if candidates}
+            total = len(futures)
+            completed = 0
+            for future in as_completed(futures):
+                rule, _candidates = futures[future]
+                try:
+                    selections[rule.rule_id] = (future.result(), "local_qwen", "")
+                except Exception as exc:
+                    llm_error = f"{type(exc).__name__}: {exc}"
+                    previous, _method, _error = selections[rule.rule_id]
+                    selections[rule.rule_id] = (previous, "lexical_fallback", llm_error)
+                    errors.append((rule.rule_id, exc))
+                completed += 1
+                interval = max(1, total // 10)
+                if completed == total or completed % interval == 0:
+                    print(f"步骤二 LLM 重排进度: {completed}/{total}", flush=True)
+        if strict_llm and errors:
+            rule_id, exc = sorted(errors, key=lambda item: item[0])[0]
+            raise RuntimeError(f"规则 {rule_id} 的本地 LLM 匹配失败: {type(exc).__name__}: {exc}") from exc
+
+    for rule, candidates in ranked:
+        selected, selection_method, llm_error = selections[rule.rule_id]
 
         matched_rules.append(
             MatchedRule(
                 rule_id=rule.rule_id,
                 rule_raw=rule.rule_raw,
                 rule_text=rule.rule_text,
+                check_method=rule.check_method,
+                structured_fields=rule.structured_fields,
                 evidence=[
                     _to_evidence(candidate.section, source_file, extracted.page_basis)
                     for candidate in selected
@@ -154,6 +167,8 @@ def prepare_case(
         artifact: dict[str, Any] = {
             "rule_id": rule.rule_id,
             "rule_raw": rule.rule_raw,
+            "check_method": rule.check_method,
+            "structured_fields": rule.structured_fields,
             "selection_method": selection_method,
             "candidates": [candidate.to_dict() for candidate in candidates],
             "selected": [candidate.to_dict() for candidate in selected],
@@ -205,6 +220,7 @@ def prepare_case(
                 "candidate_count": candidate_count,
                 "evidence_count": evidence_count,
                 "minimum_score": minimum_score,
+                "match_workers": match_workers or settings.matching_workers,
                 "output": str(output),
             },
         )

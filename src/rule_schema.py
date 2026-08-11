@@ -1,4 +1,4 @@
-"""正式输入契约、checker 输出契约与案件报告数据结构。"""
+"""正式输入契约、规则判定输出契约与案件报告数据结构。"""
 
 from __future__ import annotations
 
@@ -75,6 +75,9 @@ class MatchedEvidence:
             text=str(data.get("text", "")).strip(),
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 @dataclass(frozen=True)
 class MatchedRule:
@@ -82,6 +85,8 @@ class MatchedRule:
     rule_raw: str
     rule_text: str
     evidence: list[MatchedEvidence] = field(default_factory=list)
+    check_method: str = "大模型分析"
+    structured_fields: str = ""
 
     def __post_init__(self) -> None:
         if isinstance(self.rule_id, bool) or not isinstance(self.rule_id, int):
@@ -92,6 +97,8 @@ class MatchedRule:
             raise ValueError(f"规则 {self.rule_id} 缺少 rule_raw")
         if not self.rule_text.strip():
             raise ValueError(f"规则 {self.rule_id} 缺少 rule_text")
+        if not self.check_method.strip():
+            raise ValueError(f"规则 {self.rule_id} 缺少 check_method")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MatchedRule":
@@ -102,6 +109,8 @@ class MatchedRule:
             rule_id=rule_id,
             rule_raw=str(data.get("rule_raw", "")).strip(),
             rule_text=str(data.get("rule_text", "")).strip(),
+            check_method=str(data.get("check_method", "大模型分析")).strip() or "大模型分析",
+            structured_fields=str(data.get("structured_fields", "")).strip(),
             evidence=[MatchedEvidence.from_dict(item) for item in data.get("evidence", [])],
         )
 
@@ -167,7 +176,7 @@ class MatchedCase:
 
 @dataclass(frozen=True)
 class Finding:
-    """checker 命中的一条结论及其对输入 evidence 的回引。"""
+    """规则判定命中的一条结论及其对输入 evidence 的回引。"""
 
     evidence_index: int
     quote: str
@@ -190,6 +199,8 @@ class RuleResult:
     legal_basis: str = ""
     findings: list[Finding] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
+    confidence: float | None = None
+    missing_inputs: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuleResult":
@@ -200,6 +211,8 @@ class RuleResult:
             legal_basis=str(data.get("legal_basis", "")),
             findings=[Finding.from_dict(item) for item in data.get("findings", [])],
             metrics=dict(data.get("metrics") or {}),
+            confidence=(float(data["confidence"]) if data.get("confidence") is not None else None),
+            missing_inputs=[str(item) for item in data.get("missing_inputs", [])],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -221,9 +234,11 @@ class ReviewResult:
 class RuleRun:
     rule_id: int
     rule_raw: str
-    checker_key: str = ""
-    checker_reused: bool = False
-    generation_attempts: int = 0
+    check_method: str = ""
+    executor: str = ""
+    cache_key: str = ""
+    cached: bool = False
+    attempts: int = 0
     result: RuleResult | None = None
     review: ReviewResult | None = None
     error: str = ""
@@ -232,9 +247,11 @@ class RuleRun:
         return {
             "rule_id": self.rule_id,
             "rule_raw": self.rule_raw,
-            "checker_key": self.checker_key,
-            "checker_reused": self.checker_reused,
-            "generation_attempts": self.generation_attempts,
+            "check_method": self.check_method,
+            "executor": self.executor,
+            "cache_key": self.cache_key,
+            "cached": self.cached,
+            "attempts": self.attempts,
             "result": self.result.to_dict() if self.result else None,
             "review": self.review.to_dict() if self.review else None,
             "error": self.error,

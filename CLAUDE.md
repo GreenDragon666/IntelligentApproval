@@ -6,7 +6,7 @@
 
 1. `src/dir_extr/` 提取 PDF、Office、纯文本的分页文本、目录和章节；
 2. `src/cont_match/` 将政策规则匹配到招标原文并生成正式 JSON；
-3. `src/code_gen/` 生成、复用、执行和复核 checker，输出审批报告。
+3. `src/rule_check/` 根据规则表“检查方式”调用全局结构化执行器或本地 LLM 语义判定，输出审批报告。
 
 `main.py` 是三步统一入口；`prepare_case.py` 保留为步骤一、二独立运行/排错入口；已有
 `rules_matched.json` 可以通过 `main.py --input` 单独进入步骤三。
@@ -21,8 +21,9 @@
 - 不保留 CSV 转换逻辑；正式输入/中间接口使用约定 JSON。
 - 步骤一、二不得写死义齿、医疗器械、RPS 或特定产品领域词汇。
 - 同伴原始参考代码位于 `references/stage1+2/`，不导入生产调用链，也不随意修改。
-- 不得用手写业务 checker、模拟业务输入或伪造模型输出冒充真实生成流程。
-- checker 生成时不能写死案件 evidence，必须可跨案件复用。
+- 不在运行时生成案件专用 Python checker；确定性逻辑必须位于全局执行器。
+- “检查方式”包含“结构化数据检查”时必须走确定性执行器；其他方法走语义判定。
+- 结构化字段缺失时返回 `insufficient_input`，不得猜测为违规或通过。
 - `argparse` 的 `add_argument` 调用保持一行，不主动拆成多行排版。
 - Office 文档优先通过 LibreOffice 临时转 PDF；不得覆盖或改写用户原文件。
 - DOCX 无 LibreOffice 时允许 XML 文本降级，DOC/ODT/RTF/WPS 无转换器时必须明确报错。
@@ -34,7 +35,7 @@
 - `src/rule_schema.py`：步骤二输出、步骤三输入的正式契约。
 - `src/cont_match/pipeline.py`：步骤一、二的串联编排及正式匹配 JSON 输出。
 - `src/engine.py`：案件级审批编排，由统一入口调用。
-- `src/code_gen/checker_store.py`、`reviewer.py`、`report.py`：只属于步骤三。
+- `src/rule_check/`：步骤三检查方式路由、全局确定性执行器、语义判定、缓存、复核和报告。
 - `scripts/run_batch.py`：接收输入目录并调用统一入口的批量模式。
 
 ## 输入契约
@@ -45,6 +46,8 @@
 - `rule_id` 是整数序号；
 - `rule_raw` 对应“重点排查情形”；
 - `rule_text` 对应“触发逻辑公式”；
+- `check_method` 对应“检查方式”；
+- `structured_fields` 对应“结构化数据展示字段”；
 - `evidence` 包含原文及 PDF/文件内两套页码。
 
 ## 本地模型
@@ -55,6 +58,7 @@
 - served model name：`Qwen3-8B`；
 - 服务端变量使用 `LLM_*`，Python 客户端变量使用 `LOCAL_LLM_*`；
 - 不要在自动测试中启动模型。
+- 步骤二、三默认各并发4个请求；语义判定使用 `/no_think` 和短 JSON 输出。
 
 ## 常用命令
 
@@ -75,19 +79,19 @@ python main.py \
   --use-llm \
   --preprocess-only
 
-# 从已有 JSON 单独运行步骤三
-python main.py --input reports/report_2/matched/rules_matched.json
+# 从已有 JSON 单独运行步骤三，并从当前规则表刷新检查方式
+python main.py --input reports/report_2/matched/rules_matched.json --policy-rules /path/to/policy_rules.xlsx
 
-# 步骤三无模型诊断
+# 步骤三只执行结构化规则，禁用语义 LLM
 python main.py \
   --input reports/report_2/matched/rules_matched.json \
-  --no-generate
+  --no-llm-check
 
-# 单条规则重生成
-python gen_checker.py \
+# 单条规则重检并保留旧结果历史
+python main.py \
   --input reports/report_2/matched/rules_matched.json \
-  --rule-id 2 \
-  --force
+  --rules 2 \
+  --force-recheck
 
 # 多案件批量完整运行
 python scripts/run_batch.py \

@@ -6,12 +6,14 @@ import argparse
 import re
 import shutil
 import sys
+from dataclasses import replace
 from pathlib import Path
 
-from src.code_gen.report import to_json, to_markdown
 from src.cont_match import prepare_case
+from src.cont_match.rules import load_policy_rules
 from src.dir_extr import SUPPORTED_DOCUMENT_EXTENSIONS, is_supported_document
 from src.engine import run_case
+from src.rule_check.report import to_json, to_markdown
 from src.rule_schema import MatchedCase
 
 
@@ -23,6 +25,25 @@ def _default_output(input_path: Path) -> Path:
     if input_path.parent.name == "matched":
         return input_path.parent.parent / "results"
     return input_path.parent / "results"
+
+
+def _default_cache(input_path: Path) -> Path:
+    """把可续跑的判定缓存放在当前 report_x 内。"""
+    if input_path.parent.name == "matched":
+        return input_path.parent.parent / "decision_cache"
+    return input_path.parent / "decision_cache"
+
+
+def _load_case(input_path: Path, policy_rules_path: str | None = None) -> MatchedCase:
+    """读取已有匹配结果；可用当前政策表补齐/更新第三步路由字段而不重跑匹配。"""
+    case = MatchedCase.from_json_file(input_path)
+    if not policy_rules_path:
+        return case
+    policies = {rule.rule_id: rule for rule in load_policy_rules(policy_rules_path)}
+    missing = [rule.rule_id for rule in case.rules if rule.rule_id not in policies]
+    if missing:
+        raise ValueError(f"政策规则文件缺少案件中的规则序号: {missing}")
+    return replace(case, rules=[replace(rule, check_method=policies[rule.rule_id].check_method, structured_fields=policies[rule.rule_id].structured_fields) for rule in case.rules])
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -42,19 +63,22 @@ def _build_parser() -> argparse.ArgumentParser:
     extraction.add_argument("--max-section-pages", type=int, default=8)
 
     matching = parser.add_argument_group("步骤二：内容匹配")
-    matching.add_argument("--policy-rules", help="政策规则 JSON/XLSX；处理文档时必填")
+    matching.add_argument("--policy-rules", help="政策规则 JSON/XLSX；处理新文档时必填，--input 时可用于刷新检查方式")
     matching.add_argument("--candidate-count", type=int, default=8)
     matching.add_argument("--evidence-count", type=int, default=2)
     matching.add_argument("--minimum-score", type=float, default=0.03)
     matching.add_argument("--use-llm", action="store_true", help="使用当前本地 Qwen3-8B 服务重排匹配候选")
     matching.add_argument("--strict-llm", action="store_true", help="匹配模型调用失败时终止，不降级为字符召回")
+    matching.add_argument("--match-workers", type=int, help="步骤二并发重排规则数，默认读取 MATCHING_WORKERS")
 
-    approval = parser.add_argument_group("步骤三：checker 生成与审批")
+    approval = parser.add_argument_group("步骤三：规则校验与审批")
     approval.add_argument("--rules", nargs="*", type=int, help="只执行指定规则序号")
-    approval.add_argument("--no-generate", action="store_true", help="缺少 checker 时不调用本地模型")
-    approval.add_argument("--force-regenerate", action="store_true", help="忽略缓存重新生成")
-    approval.add_argument("--review", action="store_true", help="用本地 LLM 复核结果并反馈迭代")
-    approval.add_argument("--checker-dir", help="全局 checker 缓存目录")
+    approval.add_argument("--no-llm-check", "--no-generate", dest="no_llm_check", action="store_true", help="禁用步骤三语义规则的本地 LLM 判定；旧名 --no-generate 仍兼容")
+    approval.add_argument("--force-recheck", "--force-regenerate", dest="force_recheck", action="store_true", help="忽略当前判定缓存重新检查，并保留上一版本历史")
+    approval.add_argument("--review", action="store_true", help="用第二次本地 LLM 调用复核结果；会降低速度")
+    approval.add_argument("--check-cache-dir", "--checker-dir", dest="check_cache_dir", help="案件判定缓存目录；旧名 --checker-dir 仍兼容")
+    approval.add_argument("--check-workers", type=int, help="步骤三并发规则数，默认读取 SEMANTIC_WORKERS")
+    approval.add_argument("--rollback-rules", nargs="*", type=int, help="将指定规则恢复为判定缓存中的上一版本")
     return parser
 
 
@@ -96,8 +120,9 @@ def _discover_documents(reports_path: str | Path, reports_root: str | Path = "re
 
 
 def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace) -> None:
-    """执行 checker 流程并写案件级 JSON/Markdown 报告。"""
-    report = run_case(case, rule_ids=args.rules, generate_missing=not args.no_generate, force_regenerate=args.force_regenerate, llm_review=args.review, checker_dir=args.checker_dir)
+    """执行规则校验流程并写案件级 JSON/Markdown 报告。"""
+    cache_dir = Path(args.check_cache_dir) if args.check_cache_dir else _default_cache(input_path)
+    report = run_case(case, rule_ids=args.rules, enable_llm=not args.no_llm_check, force_recheck=args.force_recheck, llm_review=args.review, cache_dir=str(cache_dir), max_workers=args.check_workers, rollback_rule_ids=args.rollback_rules)
     output = _default_output(input_path)
     output.mkdir(parents=True, exist_ok=True)
     (output / "summary.json").write_text(to_json(report) + "\n", encoding="utf-8")
@@ -123,7 +148,7 @@ def _process_document(report_path: str | Path, args: argparse.Namespace, reports
     artifacts_dir = report_dir / "preprocessing"
     print(f"创建案件目录: {report_dir}，输入文件: {source_document}")
 
-    case = prepare_case(case_id=report_dir.name, report_path=staged_document, rules_path=args.policy_rules, output_path=matched_path, artifacts_dir=artifacts_dir, document_page_1_pdf_page=args.document_page_1_pdf_page, max_section_pages=args.max_section_pages, candidate_count=args.candidate_count, evidence_count=args.evidence_count, minimum_score=args.minimum_score, use_llm=args.use_llm, strict_llm=args.strict_llm)
+    case = prepare_case(case_id=report_dir.name, report_path=staged_document, rules_path=args.policy_rules, output_path=matched_path, artifacts_dir=artifacts_dir, document_page_1_pdf_page=args.document_page_1_pdf_page, max_section_pages=args.max_section_pages, candidate_count=args.candidate_count, evidence_count=args.evidence_count, minimum_score=args.minimum_score, use_llm=args.use_llm, strict_llm=args.strict_llm, match_workers=args.match_workers)
     evidence_count = sum(len(rule.evidence) for rule in case.rules)
     rules_with_evidence = sum(bool(rule.evidence) for rule in case.rules)
     print(f"步骤一、二完成: {matched_path} | 规则 {len(case.rules)} 匹配到原文 {rules_with_evidence} 证据段 {evidence_count}")
@@ -143,8 +168,14 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         parser.error("处理文档时必须提供 --policy-rules")
     if args.strict_llm and not args.use_llm:
         parser.error("--strict-llm 必须与 --use-llm 一起使用")
-    if args.no_generate and args.force_regenerate:
-        parser.error("--no-generate 与 --force-regenerate 不能同时使用")
+    if args.no_llm_check and args.review:
+        parser.error("--no-llm-check 与 --review 不能同时使用")
+    if args.force_recheck and args.rollback_rules:
+        parser.error("--force-recheck 与 --rollback-rules 不能同时使用")
+    if args.check_workers is not None and args.check_workers < 1:
+        parser.error("--check-workers 必须大于 0")
+    if args.match_workers is not None and args.match_workers < 1:
+        parser.error("--match-workers 必须大于 0")
 
 
 def main(argv: list[str] | None = None, *, reports_root: str | Path = "reports") -> None:
@@ -155,7 +186,7 @@ def main(argv: list[str] | None = None, *, reports_root: str | Path = "reports")
 
     if args.input:
         input_path = Path(args.input)
-        _write_report(MatchedCase.from_json_file(input_path), input_path, args)
+        _write_report(_load_case(input_path, args.policy_rules), input_path, args)
         return
     if args.one_report_path:
         _process_document(args.one_report_path, args, reports_root)
