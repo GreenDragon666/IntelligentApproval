@@ -161,7 +161,6 @@ vLLM 启动并通过健康检查后，运行：
 python main.py \
   --one_report_path /incoming/招标文件2.docx \
   --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
   --use-llm \
   --strict-llm
 ```
@@ -193,9 +192,15 @@ generated_checkers/
 └── rule_<rule_id>_<hash>.json
 ```
 
-`--document-page-1-pdf-page 9` 表示原始 PDF 或 Office 转换后 PDF 的第 9 页对应正文印刷第 1 页，
-因此正文页码为来源页码减 8。`evidence.location.page_basis` 会标记页码是原始 PDF、转换 PDF
-还是逻辑页，避免不同口径混用。
+`--document-page-1-pdf-page` 是可选的人工覆盖参数。不传时，程序同时检查 PDF Page Labels
+和 PyMuPDF 页眉/页脚中至少连续 3 页的递增印刷页码；两者一致时置信度最高，冲突时采用实际
+可见的页眉/页脚页码，并自动计算正文第 1 页对应的
+PDF 物理页。检测结果、置信度和观察依据写入 `preprocessing/manifest.json`；无法可靠识别时
+`document_pages` 保持 `null`。
+
+显式传入 `--document-page-1-pdf-page 9` 时仍始终使用人工值，表示原始 PDF 或 Office 转换后
+PDF 的第 9 页对应正文印刷第 1 页。`evidence.location.page_basis` 会继续区分原始 PDF、转换
+PDF 和逻辑页，避免不同口径混用。
 
 ## 5. 分阶段运行与排错
 

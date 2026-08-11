@@ -38,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument("--continue-on-error", action="store_true", help="批量模式中单个文档失败后继续处理")
 
     extraction = parser.add_argument_group("步骤一：目录提取")
-    extraction.add_argument("--document-page-1-pdf-page", type=int, help="正文印刷第1页对应的原始/转换 PDF 页")
+    extraction.add_argument("--document-page-1-pdf-page", type=int, help="可选人工覆盖；正文印刷第1页对应的原始/转换 PDF 页，不传时自动检测")
     extraction.add_argument("--max-section-pages", type=int, default=8)
 
     matching = parser.add_argument_group("步骤二：内容匹配")

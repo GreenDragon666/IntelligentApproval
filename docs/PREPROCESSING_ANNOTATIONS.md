@@ -47,7 +47,7 @@ prepare_case.py::main
 | `_extract_with_fitz` | 首选 PyMuPDF，逐页读取并保持页边界 | 参考原 `extract_pdf_plain_text`，但处理完整招标 PDF |
 | `_extract_with_pypdf` | PyMuPDF 不可用时用 pypdf 降级 | 参考原多提取器思路 |
 | `_extract_with_pdftotext` | Python PDF 库不可用时调用系统 `pdftotext -layout` | 新增的本机无依赖降级路径 |
-| `extract_pdf_pages` | 校验文件，按顺序选择提取器，并计算正文页码偏移 | 新项目主入口；原代码没有双页码模型 |
+| `detect_document_page_1` / `extract_pdf_pages` | 从 PDF Page Labels 或连续页眉/页脚页码推断正文第1页，按顺序选择文本提取器并计算正文页码偏移 | 支持人工参数覆盖；检测失败时正文页码保持为空 |
 | `extract_pdf_outline` | 用 PyMuPDF 读取 `(层级, 标题, PDF页)` 书签目录；失败返回空 | 新增；供目录拆分和 `outline.json` 使用 |
 
 ### `src/dir_extr/sections.py`

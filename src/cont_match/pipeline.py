@@ -196,7 +196,10 @@ def prepare_case(
                 "section_count": len(sections),
                 "rule_count": len(policy_rules),
                 "rules_with_evidence": sum(bool(rule.evidence) for rule in matched_rules),
-                "document_page_1_pdf_page": document_page_1_pdf_page,
+                "document_page_1_pdf_page": extracted.document_page_1_pdf_page,
+                "page_number_detection": (
+                    extracted.page_number_detection.to_dict() if extracted.page_number_detection else None
+                ),
                 "use_llm": use_llm,
                 "strict_llm": strict_llm,
                 "candidate_count": candidate_count,

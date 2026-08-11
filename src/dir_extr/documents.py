@@ -11,7 +11,12 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from ..page_schema import PageText
-from .pdf import extract_pdf_outline, extract_pdf_pages
+from .pdf import (
+    PageNumberDetection,
+    detect_document_page_1,
+    extract_pdf_outline,
+    extract_pdf_pages,
+)
 
 
 PDF_EXTENSIONS = frozenset({".pdf"})
@@ -34,6 +39,23 @@ class ExtractedDocument:
     source_format: str
     extraction_method: str
     page_basis: str
+    document_page_1_pdf_page: int | None = None
+    page_number_detection: PageNumberDetection | None = None
+
+
+def _page_number_detection(path: Path, explicit: int | None) -> PageNumberDetection:
+    """人工参数优先，否则从 PDF 页码标签或页眉页脚自动检测。"""
+    if explicit is not None:
+        if explicit < 1:
+            raise ValueError("document_page_1_pdf_page 必须是正整数")
+        return PageNumberDetection(
+            document_page_1_pdf_page=explicit,
+            confidence=1.0,
+            method="manual_override",
+            reason="使用命令行显式指定的正文第 1 页",
+        )
+    return detect_document_page_1(path)
+
 
 
 def is_supported_document(path: str | Path) -> bool:
@@ -161,28 +183,72 @@ def extract_document(path: str | Path, *, document_page_1_pdf_page: int | None =
         raise DocumentExtractionError(f"不支持的文档格式 {suffix or '<无扩展名>'}；当前支持: {supported}")
 
     if suffix in PDF_EXTENSIONS:
-        return ExtractedDocument(pages=extract_pdf_pages(source, document_page_1_pdf_page=document_page_1_pdf_page), outline=extract_pdf_outline(source), source_format="pdf", extraction_method="pdf_text", page_basis="original_pdf")
+        detection = _page_number_detection(source, document_page_1_pdf_page)
+        import ipdb; ipdb.set_trace()
+        return ExtractedDocument(
+            pages=extract_pdf_pages(
+                source,
+                document_page_1_pdf_page=detection.document_page_1_pdf_page,
+                auto_detect_document_page=False,
+            ),
+            outline=extract_pdf_outline(source),
+            source_format="pdf",
+            extraction_method="pdf_text",
+            page_basis="original_pdf",
+            document_page_1_pdf_page=detection.document_page_1_pdf_page,
+            page_number_detection=detection,
+        )
 
     if suffix in TEXT_EXTENSIONS:
         texts = _read_text(source).split("\f")
-        return ExtractedDocument(pages=_to_pages(texts, document_page_1_pdf_page, "文本逻辑"), outline=[], source_format=suffix[1:], extraction_method="plain_text", page_basis="logical_page")
+        return ExtractedDocument(
+            pages=_to_pages(texts, document_page_1_pdf_page, "文本逻辑"),
+            outline=[],
+            source_format=suffix[1:],
+            extraction_method="plain_text",
+            page_basis="logical_page",
+            document_page_1_pdf_page=document_page_1_pdf_page,
+        )
 
     conversion_error = ""
     try:
         with tempfile.TemporaryDirectory() as temporary:
             converted_pdf = _convert_office_to_pdf(source, Path(temporary))
-            pages = [replace(page, page_label="转换PDF") for page in extract_pdf_pages(converted_pdf, document_page_1_pdf_page=document_page_1_pdf_page)]
+            detection = _page_number_detection(converted_pdf, document_page_1_pdf_page)
+            pages = [
+                replace(page, page_label="转换PDF")
+                for page in extract_pdf_pages(
+                    converted_pdf,
+                    document_page_1_pdf_page=detection.document_page_1_pdf_page,
+                    auto_detect_document_page=False,
+                )
+            ]
             outline = extract_pdf_outline(converted_pdf)
             if converted_pdf_output is not None:
                 preserved_pdf = Path(converted_pdf_output)
                 preserved_pdf.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(converted_pdf, preserved_pdf)
-            return ExtractedDocument(pages=pages, outline=outline, source_format=suffix[1:], extraction_method="libreoffice_pdf", page_basis="converted_pdf")
+            return ExtractedDocument(
+                pages=pages,
+                outline=outline,
+                source_format=suffix[1:],
+                extraction_method="libreoffice_pdf",
+                page_basis="converted_pdf",
+                document_page_1_pdf_page=detection.document_page_1_pdf_page,
+                page_number_detection=detection,
+            )
     except Exception as exc:
         conversion_error = f"{type(exc).__name__}: {exc}"
 
     if suffix in {".docx", ".docm"}:
         pages = _extract_docx_xml(source, document_page_1_pdf_page)
-        return ExtractedDocument(pages=pages, outline=[], source_format=suffix[1:], extraction_method="docx_xml_fallback", page_basis="logical_page")
+        return ExtractedDocument(
+            pages=pages,
+            outline=[],
+            source_format=suffix[1:],
+            extraction_method="docx_xml_fallback",
+            page_basis="logical_page",
+            document_page_1_pdf_page=document_page_1_pdf_page,
+        )
 
     raise DocumentExtractionError(f"{suffix} 需要 LibreOffice/soffice 转换为 PDF；转换详情: {conversion_error}")

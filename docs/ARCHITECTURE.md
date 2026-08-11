@@ -91,7 +91,7 @@ main.py --reports_path <目录>
 - 使用 PyMuPDF 逐真实 PDF 页抽取文本；
 - 依赖不可用时依次尝试 pypdf 和系统 `pdftotext`；
 - 保存 PDF 物理页；
-- 根据 `document_page_1_pdf_page` 计算正文印刷页；
+- 优先使用人工指定的 `document_page_1_pdf_page`；未指定时根据 PDF Page Labels 或连续页眉/页脚页码自动推断，再计算正文印刷页；
 - 提取 PDF 书签目录。
 
 `dir_extr/sections.py`：

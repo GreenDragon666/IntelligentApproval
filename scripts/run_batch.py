@@ -18,7 +18,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量运行招标文件完整审批流程")
     parser.add_argument("--reports_path", required=True, help="批量输入目录；递归处理其中所有支持的文档")
     parser.add_argument("--policy-rules", required=True, help="政策规则 JSON/XLSX")
-    parser.add_argument("--document-page-1-pdf-page", type=int, help="正文印刷第1页对应的原始/转换 PDF 页")
+    parser.add_argument("--document-page-1-pdf-page", type=int, help="可选人工覆盖；正文印刷第1页对应的原始/转换 PDF 页，不传时自动检测")
     parser.add_argument("--max-section-pages", type=int, default=8)
     parser.add_argument("--candidate-count", type=int, default=8)
     parser.add_argument("--evidence-count", type=int, default=2)
