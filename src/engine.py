@@ -41,14 +41,14 @@ def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force
                 return run
 
     if run.result is None and not rule.evidence:
-        run.result = RuleResult(rule_id=rule.rule_id, status=Status.INSUFFICIENT_INPUT, summary="未匹配到可供校验的原文。", confidence=1.0, missing_inputs=["招标文件相关原文"])
+        run.result = RuleResult(rule_id=rule.rule_id, status=Status.WARNING, summary="内容匹配阶段未定位到相关原文，当前不能自动判断；这不代表规则要求的输入资料缺失。", confidence=0.0, metrics={"reason": "evidence_not_retrieved"})
         cache.save(rule, run.result, executor=executor, attempts=0)
         return run
 
     if run.result is None:
         try:
             if structured:
-                run.result = evaluate_structured(rule)
+                run.result = evaluate_structured(rule, enable_semantic_aliases=enable_llm)
             elif enable_llm:
                 evaluation = evaluate_semantic(rule)
                 run.result = evaluation.result

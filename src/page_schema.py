@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+from .rule_parts import legal_basis
+
 
 @dataclass(frozen=True)
 class PageText:
@@ -45,8 +47,8 @@ class PolicyRule:
 
     @property
     def query_text(self) -> str:
-        """返回供检索使用的规则原文、提示和完整逻辑拼接文本。"""
-        return "\n".join([self.rule_raw, *self.match_hints, self.rule_text])
+        """返回规则原文、法规依据和可选章节提示；公式/开发说明不参与。"""
+        return "\n".join(value for value in [self.rule_raw, legal_basis(self.rule_text), *self.match_hints] if value)
 
 
 @dataclass(frozen=True)

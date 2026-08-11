@@ -22,6 +22,16 @@ class SemanticExecutorTest(unittest.TestCase):
         self.assertIn("/no_think", chat.call_args.args[0])
 
     @patch("src.rule_check.semantic.llm.chat")
+    def test_payload_includes_legal_basis_but_excludes_formula(self, chat) -> None:
+        self.rule = MatchedRule(rule_id=2, rule_raw="检查期限", rule_text="【法规依据】法定期限至少5日。\n【公式】IF 虚构字段 < 99 THEN 违规\n【开发说明】虚构输入表", evidence=self.rule.evidence, check_method="大模型分析")
+        chat.return_value = json.dumps({"status": "pass", "summary": "未触发", "legal_basis": "法定期限至少5日。", "findings": [], "confidence": 0.8, "missing_inputs": []}, ensure_ascii=False)
+        evaluate_semantic(self.rule)
+        prompt = chat.call_args.args[0]
+        self.assertIn("法定期限至少5日", prompt)
+        self.assertNotIn("虚构字段", prompt)
+        self.assertNotIn("虚构输入表", prompt)
+
+    @patch("src.rule_check.semantic.llm.chat")
     def test_invalid_quote_is_retried(self, chat) -> None:
         invalid = {"status": "violation", "summary": "x", "findings": [{"evidence_index": 0, "quote": "不存在的原文", "reason": "x"}], "confidence": 0.8, "missing_inputs": []}
         valid = {"status": "pass", "summary": "未明确触发", "findings": [], "confidence": 0.7, "missing_inputs": []}
@@ -29,6 +39,20 @@ class SemanticExecutorTest(unittest.TestCase):
         evaluation = evaluate_semantic(self.rule)
         self.assertEqual(evaluation.result.status, Status.PASS)
         self.assertEqual(evaluation.attempts, 2)
+
+    @patch("src.rule_check.semantic.llm.chat")
+    def test_pdf_whitespace_quote_is_mapped_back_to_source(self, chat) -> None:
+        self.rule = MatchedRule(rule_id=2, rule_raw="评分标准是否明确", rule_text="【法规依据】评标标准应明确。", evidence=[MatchedEvidence(self.rule.evidence[0].location, "技术方案优 秀得10分，未说明分档标准。")], check_method="大模型分析")
+        chat.return_value = json.dumps({"status": "violation", "summary": "评分标准未细化", "findings": [{"evidence_index": 0, "quote": "技术方案优秀得10分", "reason": "未细化"}], "confidence": 0.9, "missing_inputs": []}, ensure_ascii=False)
+        evaluation = evaluate_semantic(self.rule)
+        self.assertEqual(evaluation.result.findings[0].quote, "技术方案优 秀得10分")
+
+    @patch("src.rule_check.semantic.llm.chat")
+    def test_pass_discards_explanatory_findings(self, chat) -> None:
+        chat.return_value = json.dumps({"status": "pass", "summary": "已明确", "findings": [{"evidence_index": 0, "quote": "技术方案优秀得10分", "reason": "说明性引用"}], "confidence": 0.7, "missing_inputs": []}, ensure_ascii=False)
+        evaluation = evaluate_semantic(self.rule)
+        self.assertEqual(evaluation.result.status, Status.PASS)
+        self.assertEqual(evaluation.result.findings, [])
 
 
 if __name__ == "__main__":

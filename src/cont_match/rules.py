@@ -17,10 +17,7 @@ _TEXT_COLUMNS = ("触发逻辑公式", "rule_text", "规则逻辑描述")
 _METHOD_COLUMNS = ("检查方式", "check_method")
 _STRUCTURED_COLUMNS = ("结构化数据展示字段", "structured_fields")
 _HINT_COLUMNS = (
-    "触发逻辑",
     "非结构化文件中模块",
-    "非结构化文件",
-    "结构化数据展示字段",
     "章节",
     "关键词",
 )

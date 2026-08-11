@@ -8,10 +8,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.cont_match.llm_matcher import _candidate_excerpt
 from src.cont_match.pipeline import prepare_case
+from src.page_schema import PolicyRule
 
 
 class MatchingConcurrencyTest(unittest.TestCase):
+    def test_llm_excerpt_focuses_on_rule_match_in_late_section_text(self) -> None:
+        rule = PolicyRule(rule_id=1, rule_raw="投标保证金比例不得超过限制", rule_text="生成内容")
+        text = "无关内容" * 500 + "投标保证金比例不得超过限制" + "尾部" * 500
+        excerpt = _candidate_excerpt(rule, text, 120)
+        self.assertIn("投标保证金比例不得超过限制", excerpt)
+
     def test_llm_candidate_selection_runs_concurrently_and_keeps_method(self) -> None:
         active = 0
         peak = 0
@@ -37,6 +45,17 @@ class MatchingConcurrencyTest(unittest.TestCase):
                 case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", use_llm=True, strict_llm=True, match_workers=4, candidate_count=1, evidence_count=1, minimum_score=0)
         self.assertGreater(peak, 1)
         self.assertTrue(all(rule.check_method == "大模型分析" for rule in case.rules))
+
+    def test_empty_llm_selection_keeps_lexical_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = root / "report.txt"
+            report.write_text("第一章 评标办法\n评分标准应当明确具体。", encoding="utf-8")
+            rules_path = root / "rules.json"
+            rules_path.write_text(json.dumps([{"rule_id": 1, "rule_raw": "评分标准是否明确", "rule_text": "生成内容", "check_method": "大模型分析"}], ensure_ascii=False), encoding="utf-8")
+            with patch("src.cont_match.pipeline.select_candidates", return_value=[]):
+                case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", use_llm=True, strict_llm=True, candidate_count=1, evidence_count=1, minimum_score=0)
+        self.assertEqual(len(case.rules[0].evidence), 1)
 
 
 if __name__ == "__main__":

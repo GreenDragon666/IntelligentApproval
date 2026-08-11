@@ -77,10 +77,10 @@ prepare_case.py::main
 
 | 函数 | 作用 | 与原代码关系 |
 |---|---|---|
-| `_terms` | 去法规依据块后构造中文/英文字符2-3 gram及特殊数字词项 | 重写原字符 TF-IDF 思路，避免长法规依据主导匹配 |
+| `_terms` | 将调用方已选定的查询/章节文本构造成中文/英文字符2-3 gram及特殊数字词项 | 重写原字符 TF-IDF 思路 |
 | `LexicalSectionMatcher.__init__` | 为章节和标题建立词频、文档频率和 IDF | 对应原 `RpsMatcher.__init__`，但对象改为招标章节 |
 | `_cosine` | 用对数词频和 IDF 计算两个稀疏 Counter 的余弦相似度 | 新增长度归一化，避免长章节天然得高分 |
-| `rank` | 给匹配提示加权，综合正文/标题相似度，返回 top-k 正分候选 | 删除原 RPS 章节和医疗关键词先验 |
+| `rank` | 分别计算 rule_raw、法规依据与正文/标题的相似度并加权，返回 top-k 正分候选 | 删除原 RPS 章节和医疗关键词先验 |
 
 ### `src/cont_match/llm_matcher.py`
 

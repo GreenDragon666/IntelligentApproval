@@ -37,10 +37,10 @@
 - `case_id` 由程序根据 `reports/report_x/` 自动生成。
 - `source` 只包含 `file`。
 - `rule_id` 是正整数，对应规则表“序号”。
-- `rule_raw` 对应“重点排查情形”。
-- `rule_text` 对应“触发逻辑公式”。
-- `check_method` 对应“检查方式”。
-- `structured_fields` 对应“结构化数据展示字段”，允许空字符串。
+- `rule_raw` 对应“重点排查情形”，决定审查主题。
+- `rule_text` 对应混合的生成内容；只解析其中明确的 `【法规依据】` 作为补充参考，公式、开发说明和其他生成块不参与召回或判定。
+- `check_method` 对应“检查方式”，用于执行器路由。
+- `structured_fields` 对应“结构化数据展示字段”，允许空字符串，属于字段映射提示。
 - `evidence` 固定为数组；未匹配时为空数组。
 - `pdf_pages` 保留旧字段名，具体页码口径由 `page_basis` 区分。
 - `document_pages` 没有可靠正文印刷页码时为 `null`。

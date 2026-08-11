@@ -7,13 +7,11 @@ import re
 from collections import Counter
 
 from ..page_schema import DocumentSection, PolicyRule, SectionCandidate
-
-_LEGAL_BASIS = re.compile(r"【法规依据】.*?(?=【公式】|【开发说明】|$)", re.DOTALL)
-
+from ..rule_parts import legal_basis
 
 def _terms(text: str) -> Counter[str]:
-    """将文本转换为中文/英文字符 n-gram 词频，法规依据块不参与召回。"""
-    text = _LEGAL_BASIS.sub(" ", str(text or "").lower())
+    """将已选定的查询/章节文本转换为中文、英文字符 n-gram。"""
+    text = str(text or "").lower()
     compact = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
     terms: Counter[str] = Counter()
     for size in (2, 3):
@@ -66,22 +64,20 @@ class LexicalSectionMatcher:
     def rank(self, rule: PolicyRule, top_k: int = 5) -> list[SectionCandidate]:
         """综合正文与标题相似度，返回分数大于零的 top-k 章节。"""
         # 模块/章节提示比法规长文更能定位原文，因此在查询中适度加权；不引入任何行业词表。
-        query = _terms(
-            rule.rule_raw
-            + "\n"
-            + rule.rule_text
-            + "\n"
-            + "\n".join(rule.match_hints * 3)
-        )
+        # rule_raw 决定审查主题；法规依据补充具体法律概念、数字和期限。
+        # 公式、量化标准块、开发说明和结构化字段不参与召回。
+        raw_query = _terms("\n".join([rule.rule_raw] * 3 + rule.match_hints))
+        legal_query = _terms(legal_basis(rule.rule_text))
         candidates: list[SectionCandidate] = []
         for section, terms, title_terms in zip(
             self.sections,
             self.section_terms,
             self.title_terms,
         ):
-            content_score = self._cosine(query, terms)
-            title_score = self._cosine(query, title_terms)
-            score = 0.75 * content_score + 0.25 * title_score
+            raw_content_score = self._cosine(raw_query, terms)
+            legal_content_score = self._cosine(legal_query, terms) if legal_query else 0.0
+            title_score = self._cosine(raw_query, title_terms)
+            score = 0.60 * raw_content_score + 0.15 * legal_content_score + 0.25 * title_score
             candidates.append(SectionCandidate(section=section, score=float(score)))
         candidates.sort(key=lambda item: item.score, reverse=True)
         return [item for item in candidates[:top_k] if item.score > 0]

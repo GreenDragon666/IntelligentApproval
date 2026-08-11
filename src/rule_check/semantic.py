@@ -8,17 +8,18 @@ from dataclasses import dataclass
 
 from config import settings
 from .. import llm
+from ..rule_parts import legal_basis
 from ..rule_schema import Finding, MatchedRule, RuleResult, Status
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _ALLOWED_STATUSES = {Status.VIOLATION, Status.WARNING, Status.PASS, Status.INSUFFICIENT_INPUT}
 
-SYSTEM_PROMPT = """你是招标文件合规审查器。严格依据给定规则和证据作答，不生成 Python 代码，不补充未提供的事实。
+SYSTEM_PROMPT = """你是招标文件合规审查器。rule_raw（重点排查情形）决定审查主题；legal_basis_reference 是可参考的法规依据，可补充具体法律要求、数值和期限；check_method 仅表示检查路线。严格依据这两项和证据作答，不生成 Python 代码，不补充未提供的事实。
 必须返回一个 JSON 对象，不得输出 Markdown 或思考过程。JSON 字段：
 {"status":"violation|warning|pass|insufficient_input","summary":"简短结论","legal_basis":"规则中已有法规依据，无法确定则空字符串","findings":[{"evidence_index":0,"quote":"证据中的连续原文","reason":"该原文如何触发规则"}],"confidence":0到1,"missing_inputs":["缺失资料"]}
 要求：
 1. findings 中的 quote 必须逐字来自对应 evidence.text，不能改写。
-2. 证据不足以覆盖规则要求的文件、字段或比较对象时返回 insufficient_input，不能把缺失当作违规或通过。
+2. 只有 rule_raw 或 legal_basis_reference 明确要求的外部文件或比较对象未提供时，才能返回 insufficient_input；不得根据公式、开发说明或预设字段推断缺失输入。
 3. 没有明确命中时不得仅凭关键词判违规，必须结合上下文和规则条件。
 4. status=pass 时 findings 应为空；violation/warning 时至少提供一条可回引证据。
 5. 不得把 evidence 数组位置臆测为某类外部文件，只能使用 location 中明确提供的信息。"""
@@ -71,9 +72,29 @@ def _payload(rule: MatchedRule) -> dict:
         "rule_id": rule.rule_id,
         "check_method": rule.check_method,
         "rule_raw": rule.rule_raw,
-        "rule_text": rule.rule_text,
+        "legal_basis_reference": legal_basis(rule.rule_text),
         "evidence": evidence_items,
     }
+
+
+def _source_quote(text: str, quote: str) -> str | None:
+    """接受模型折叠 PDF 空白的引用，并回映射为 evidence 中的连续原文。"""
+    if quote in text:
+        return quote
+    text_chars: list[str] = []
+    positions: list[int] = []
+    for index, char in enumerate(text):
+        if not char.isspace():
+            text_chars.append(char)
+            positions.append(index)
+    compact_quote = "".join(char for char in quote if not char.isspace())
+    if not compact_quote:
+        return None
+    start = "".join(text_chars).find(compact_quote)
+    if start < 0:
+        return None
+    end = start + len(compact_quote) - 1
+    return text[positions[start]:positions[end] + 1]
 
 
 def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
@@ -89,13 +110,14 @@ def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
         if evidence_index < 0 or evidence_index >= len(rule.evidence):
             raise ValueError(f"evidence_index 越界: {evidence_index}")
         quote = str(item.get("quote", "")).strip()
-        if not quote or quote not in rule.evidence[evidence_index].text:
+        source_quote = _source_quote(rule.evidence[evidence_index].text, quote)
+        if source_quote is None:
             raise ValueError("quote 不是对应 evidence.text 中的连续原文")
-        findings.append(Finding(evidence_index=evidence_index, quote=quote, reason=str(item.get("reason", "")).strip()))
+        findings.append(Finding(evidence_index=evidence_index, quote=source_quote, reason=str(item.get("reason", "")).strip()))
     if status in {Status.VIOLATION, Status.WARNING} and not findings:
         raise ValueError(f"{status.value} 必须提供至少一条 finding")
-    if status == Status.PASS and findings:
-        raise ValueError("pass 不得包含 findings")
+    if status == Status.PASS:
+        findings = []
     confidence = float(data.get("confidence", 0.0))
     if confidence < 0 or confidence > 1:
         raise ValueError("confidence 必须在 0 到 1 之间")
@@ -103,7 +125,7 @@ def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
         rule_id=rule.rule_id,
         status=status,
         summary=str(data.get("summary", "")).strip() or "本地模型未提供结论摘要。",
-        legal_basis=str(data.get("legal_basis", "")).strip(),
+        legal_basis=legal_basis(rule.rule_text),
         findings=findings,
         metrics={"executor": "semantic_llm"},
         confidence=confidence,

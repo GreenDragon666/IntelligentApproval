@@ -132,9 +132,16 @@ def prepare_case(
             total = len(futures)
             completed = 0
             for future in as_completed(futures):
-                rule, _candidates = futures[future]
+                rule, candidates = futures[future]
                 try:
-                    selections[rule.rule_id] = (future.result(), "local_qwen", "")
+                    selected = future.result()
+                    if selected:
+                        selections[rule.rule_id] = (selected, "local_qwen", "")
+                    else:
+                        previous, _method, _error = selections[rule.rule_id]
+                        # Qwen 的“全部拒绝”不能抹掉第一阶段已经达到阈值的候选。
+                        # 保留字符召回证据，交给步骤三结合 rule_raw 再判断。
+                        selections[rule.rule_id] = (previous, "local_qwen_empty_lexical_fallback", "")
                 except Exception as exc:
                     llm_error = f"{type(exc).__name__}: {exc}"
                     previous, _method, _error = selections[rule.rule_id]
