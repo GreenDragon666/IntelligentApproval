@@ -8,7 +8,7 @@ set -euo pipefail
 
 export CUDA_VISIBLE_DEVICES=${LLM_CUDA_VISIBLE_DEVICES:-3}
 
-MODEL_PATH="${LLM_MODEL_PATH:-/home/zyl/LLM Library/Qwen3-8B}"
+MODEL_PATH="${LLM_MODEL_PATH:-/home/zyl/public/LLM Library/Qwen3-8B}"
 SERVED_NAME="${LLM_MODEL:-Qwen3-8B}"
 HOST="${LLM_HOST:-127.0.0.1}"
 PORT="${LLM_PORT:-8001}"

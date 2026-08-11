@@ -184,7 +184,6 @@ def extract_document(path: str | Path, *, document_page_1_pdf_page: int | None =
 
     if suffix in PDF_EXTENSIONS:
         detection = _page_number_detection(source, document_page_1_pdf_page)
-        import ipdb; ipdb.set_trace()
         return ExtractedDocument(
             pages=extract_pdf_pages(
                 source,
