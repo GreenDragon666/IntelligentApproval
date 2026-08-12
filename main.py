@@ -130,7 +130,7 @@ def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace)
     (output / "summary.json").write_text(to_json(report) + "\n", encoding="utf-8")
     (output / "summary.md").write_text(to_markdown(report, case), encoding="utf-8")
     counts = report.to_dict()["summary"]
-    print(f"总体结论: {report.overall} | 通过 {counts['pass']} | 预警 {counts['warning']} | 违规 {counts['violation']} | 执行失败 {counts['error']} | 流程错误 {counts['pipeline_error']}")
+    print(f"总体结论: {report.overall} | 通过 {counts['pass']} | 预警 {counts['warning']} | 违规 {counts['violation']} | 执行失败 {counts['error']} | 分析失败 {counts['analysis_error']} | 流程错误 {counts['pipeline_error']}")
     print(f"报告已写入: {output / 'summary.json'}, {output / 'summary.md'}")
     return report
 

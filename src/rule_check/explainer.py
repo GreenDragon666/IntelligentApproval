@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, replace
 
 from config import settings
 from .. import llm
 from ..rule_parts import legal_basis, rule_description
 from ..rule_schema import MatchedRule, RuleResult
-
-_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+from .json_output import extract_json_object
 
 SYSTEM_PROMPT = """你是招标文件合规结果解释员。你要检查一个已经由确定性程序算出的结果是否与规则和证据相符，并给执法人员写出简洁、可解释的分析。
 依据优先级：rule_raw 决定审查主题；legal_basis_reference 可补充明确的法律要求、数值和期限；description_reference 只帮助理解适用场景，不得单独新增阈值、条件或缺失输入。
@@ -23,6 +21,14 @@ SYSTEM_PROMPT = """你是招标文件合规结果解释员。你要检查一个�
 class ResultExplanation:
     result: RuleResult
     attempts: int = 1
+    raw: str = ""
+
+
+class ExplanationError(RuntimeError):
+    def __init__(self, message: str, *, attempts: int, raw: str = ""):
+        super().__init__(message)
+        self.attempts = attempts
+        self.raw = raw
 
 
 def _evidence(rule: MatchedRule) -> list[dict]:
@@ -47,10 +53,7 @@ def _evidence(rule: MatchedRule) -> list[dict]:
 
 
 def _parse(raw: str) -> dict:
-    match = _JSON_BLOCK.search(raw)
-    data = json.loads((match.group(1) if match else raw).strip())
-    if not isinstance(data, dict):
-        raise ValueError("LLM 分析结果必须是 JSON 对象")
+    data = extract_json_object(raw, label="LLM 分析结果")
     if type(data.get("consistent")) is not bool:
         raise ValueError("LLM 分析结果缺少布尔字段 consistent")
     analysis = str(data.get("analysis", "")).strip()
@@ -75,21 +78,22 @@ def explain_result(rule: MatchedRule, result: RuleResult) -> ResultExplanation:
     }
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     last_error = ""
+    last_raw = ""
     for attempt in range(1, settings.semantic_max_retries + 2):
         correction = f"\n上一次输出校验失败：{last_error}\n请只修正 JSON。" if last_error else ""
         try:
-            raw = llm.chat(
+            last_raw = llm.chat(
                 f"/no_think\n请分析以下规则校验结果。{correction}\n输入：{serialized}",
                 system=SYSTEM_PROMPT,
                 temperature=0.0,
                 max_tokens=settings.semantic_max_tokens,
             )
-            data = _parse(raw)
+            data = _parse(last_raw)
             break
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
     else:
-        raise RuntimeError(f"LLM 结果分析连续失败 {settings.semantic_max_retries + 1} 次：{last_error}")
+        raise ExplanationError(f"LLM 结果分析连续失败 {settings.semantic_max_retries + 1} 次：{last_error}", attempts=settings.semantic_max_retries + 1, raw=last_raw[:2000])
     metrics = {
         **result.metrics,
         "llm_analysis_consistent": data["consistent"],

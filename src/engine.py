@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 
 from config import settings
 from .rule_check import DecisionCache, evaluate_semantic, evaluate_structured, explain_result, is_structured_method
 from .rule_check.cache import decision_key
+from .rule_check.explainer import ExplanationError
 from .rule_check.reviewer import review as review_result
 from .rule_schema import ApprovalReport, MatchedCase, MatchedRule, RuleResult, RuleRun, Status
 
@@ -28,12 +30,36 @@ def _add_explanation(rule: MatchedRule, run: RuleRun) -> bool:
         return True
     try:
         explanation = explain_result(rule, run.result)
+    except ExplanationError as exc:
+        run.attempts += exc.attempts
+        run.analysis_error = f"{type(exc).__name__}: {exc}"
+        run.analysis_raw = exc.raw
+        return False
     except Exception as exc:
-        message = f"LLM 结果分析失败: {type(exc).__name__}: {exc}"
-        run.error = f"{run.error}；{message}" if run.error else message
+        run.analysis_error = f"{type(exc).__name__}: {exc}"
         return False
     run.result = explanation.result
     run.attempts += explanation.attempts
+    run.analysis_error = ""
+    run.analysis_raw = ""
+    return True
+
+
+def _adjudicate_structured_warning(rule: MatchedRule, run: RuleRun) -> bool:
+    """正则无法完成时，用与普通语义规则相同的输入契约形成最终判断。"""
+    if run.structured_result is None:
+        return False
+    try:
+        evaluation = evaluate_semantic(rule)
+    except Exception as exc:
+        run.attempts += settings.semantic_max_retries + 1
+        run.analysis_error = f"结构化兜底语义判定失败: {type(exc).__name__}: {exc}"
+        run.result = run.structured_result
+        return False
+    run.attempts += evaluation.attempts
+    run.result = replace(evaluation.result, metrics={**evaluation.result.metrics, "structured_fallback": True, "structured_status": run.structured_result.status.value})
+    run.analysis_error = ""
+    run.analysis_raw = ""
     return True
 
 
@@ -50,10 +76,22 @@ def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force
         cached = cache.load(rule)
         if cached is not None:
             run.result, metadata = cached
+            structured_data = metadata.get("structured_result")
+            run.structured_result = RuleResult.from_dict(structured_data) if isinstance(structured_data, dict) else None
+            if structured and run.structured_result is None:
+                # 兼容旧缓存：当时 result 本身就是结构化初判，但尚未单独保存 structured_result。
+                run.structured_result = run.result
             run.cached = True
             run.attempts = int(metadata.get("attempts", 0))
-            if enable_llm and not run.result.analysis and _add_explanation(rule, run):
-                cache.save(rule, run.result, executor=executor, attempts=run.attempts, error=run.error)
+            run.analysis_error = str(metadata.get("analysis_error", ""))
+            run.analysis_raw = str(metadata.get("analysis_raw", ""))
+            if enable_llm and not run.result.analysis:
+                if structured and run.structured_result and run.structured_result.metrics.get("requires_review"):
+                    _adjudicate_structured_warning(rule, run)
+                else:
+                    _add_explanation(rule, run)
+                # 成功和失败都保存：避免旧缓存每次续跑都重复相同失败，也保留实际调用次数和原始输出。
+                cache.save(rule, run.result, executor=executor, attempts=run.attempts, error=run.error, structured_result=run.structured_result, analysis_error=run.analysis_error, analysis_raw=run.analysis_raw)
             if not llm_review:
                 return run
 
@@ -65,8 +103,11 @@ def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force
     if run.result is None:
         try:
             if structured:
-                run.result = evaluate_structured(rule, enable_semantic_aliases=enable_llm)
-                if enable_llm:
+                run.structured_result = evaluate_structured(rule, enable_semantic_aliases=enable_llm)
+                run.result = run.structured_result
+                if enable_llm and run.structured_result.metrics.get("requires_review"):
+                    _adjudicate_structured_warning(rule, run)
+                elif enable_llm:
                     _add_explanation(rule, run)
             elif enable_llm:
                 evaluation = evaluate_semantic(rule)
@@ -90,7 +131,7 @@ def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force
                 run.error = f"LLM 复核未通过: {run.review.feedback}"
 
     if not run.cached:
-        cache.save(rule, run.result, executor=executor, attempts=run.attempts, error=run.error)
+        cache.save(rule, run.result, executor=executor, attempts=run.attempts, error=run.error, structured_result=run.structured_result, analysis_error=run.analysis_error, analysis_raw=run.analysis_raw)
     return run
 
 

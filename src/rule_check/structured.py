@@ -232,6 +232,11 @@ def _finding(value: ExtractedValue, reason: str) -> Finding:
     return Finding(evidence_index=value.evidence_index, quote=value.quote, reason=reason)
 
 
+def _value_trace(field: str, value: ExtractedValue) -> dict:
+    serialized = value.value.isoformat() if isinstance(value.value, datetime) else value.value
+    return {"field": field, "value": serialized, "evidence_index": value.evidence_index, "quote": value.quote}
+
+
 def _trigger_status(formula: str, start: int, end: int) -> Status:
     line_start = formula.rfind("\n", 0, start) + 1
     line_end = formula.find("\n", end)
@@ -280,6 +285,7 @@ def _evaluate_ratios(rule: MatchedRule, formula: str, resolved: dict[str, ValueC
         return None
     missing: list[str] = []
     evaluated = 0
+    traces: list[dict] = []
     for match in checks:
         numerator_name = _formula_field(match.group("numerator"))
         denominator_name = _formula_field(match.group("denominator"))
@@ -297,12 +303,14 @@ def _evaluate_ratios(rule: MatchedRule, formula: str, resolved: dict[str, ValueC
             continue
         evaluated += 1
         ratio = float(numerator.value) / float(denominator.value)
+        trace = {"type": "ratio", "operands": [_value_trace(numerator_name, numerator), _value_trace(denominator_name, denominator)], "operator": operator, "actual": ratio, "threshold": threshold}
+        traces.append(trace)
         violated = {">": ratio > threshold, ">=": ratio >= threshold, "<": ratio < threshold, "<=": ratio <= threshold}[operator]
         if violated:
             status = _trigger_status(formula, match.start(), match.end())
-            return _status_result(rule, status, f"结构化比例检查触发：{ratio:.2%} {operator} {threshold:.2%}。", findings=[_finding(numerator, f"{numerator_name}/{denominator_name}={ratio:.2%}")], metrics={"ratio": round(ratio, 6), "threshold": threshold})
+            return _status_result(rule, status, f"结构化比例检查触发：{ratio:.2%} {operator} {threshold:.2%}。", findings=[_finding(numerator, f"{numerator_name}/{denominator_name}={ratio:.2%}")], metrics={"ratio": round(ratio, 6), "threshold": threshold, "structured_checks": traces})
     if evaluated:
-        return _status_result(rule, Status.PASS, "结构化比例检查通过。", metrics={"evaluated_checks": evaluated})
+        return _status_result(rule, Status.PASS, "结构化比例检查通过。", metrics={"evaluated_checks": evaluated, "structured_checks": traces})
     return _status_result(rule, Status.INSUFFICIENT_INPUT, "缺少执行结构化比例检查所需的数据。", missing=list(dict.fromkeys(missing)))
 
 
@@ -312,6 +320,7 @@ def _evaluate_absolute_money(rule: MatchedRule, formula: str, resolved: dict[str
         return None
     missing = []
     evaluated = 0
+    traces: list[dict] = []
     for match in checks:
         field = _formula_field(match.group("field"))
         threshold = float(match.group("threshold"))
@@ -324,12 +333,13 @@ def _evaluate_absolute_money(rule: MatchedRule, formula: str, resolved: dict[str
             continue
         evaluated += 1
         current = float(extracted.value)
+        traces.append({"type": "money", "operands": [_value_trace(field, extracted)], "operator": operator, "actual": current, "threshold": threshold})
         violated = {">": current > threshold, ">=": current >= threshold, "<": current < threshold, "<=": current <= threshold}[operator]
         if violated:
             status = _trigger_status(formula, match.start(), match.end())
-            return _status_result(rule, status, f"结构化金额检查触发：{current:g} {operator} {threshold:g}。", findings=[_finding(extracted, f"{field}触发规则阈值")], metrics={"value": current, "threshold": threshold})
+            return _status_result(rule, status, f"结构化金额检查触发：{current:g} {operator} {threshold:g}。", findings=[_finding(extracted, f"{field}触发规则阈值")], metrics={"structured_checks": traces})
     if evaluated:
-        return _status_result(rule, Status.PASS, "结构化金额检查通过。", metrics={"evaluated_checks": evaluated})
+        return _status_result(rule, Status.PASS, "结构化金额检查通过。", metrics={"evaluated_checks": evaluated, "structured_checks": traces})
     return _status_result(rule, Status.INSUFFICIENT_INPUT, "缺少执行结构化金额检查所需的数据。", missing=list(dict.fromkeys(missing)))
 
 
@@ -339,6 +349,7 @@ def _evaluate_percentages(rule: MatchedRule, formula: str, resolved: dict[str, V
         return None
     missing = []
     evaluated = 0
+    traces: list[dict] = []
     for match in checks:
         field = _formula_field(match.group("field"))
         threshold = float(match.group("threshold"))
@@ -351,12 +362,13 @@ def _evaluate_percentages(rule: MatchedRule, formula: str, resolved: dict[str, V
             continue
         evaluated += 1
         current = float(extracted.value)
+        traces.append({"type": "percent", "operands": [_value_trace(field, extracted)], "operator": operator, "actual": current, "threshold": threshold})
         triggered = {">": current > threshold, ">=": current >= threshold, "<": current < threshold, "<=": current <= threshold}[operator]
         if triggered:
             status = _trigger_status(formula, match.start(), match.end())
-            return _status_result(rule, status, f"结构化比例字段检查触发：{current:.2%} {operator} {threshold:.2%}。", findings=[_finding(extracted, f"{field}触发规则阈值")], metrics={"value": current, "threshold": threshold})
+            return _status_result(rule, status, f"结构化比例字段检查触发：{current:.2%} {operator} {threshold:.2%}。", findings=[_finding(extracted, f"{field}触发规则阈值")], metrics={"structured_checks": traces})
     if evaluated:
-        return _status_result(rule, Status.PASS, "结构化比例字段检查通过。", metrics={"evaluated_checks": evaluated})
+        return _status_result(rule, Status.PASS, "结构化比例字段检查通过。", metrics={"evaluated_checks": evaluated, "structured_checks": traces})
     return _status_result(rule, Status.INSUFFICIENT_INPUT, "缺少执行结构化比例字段检查所需的数据。", missing=list(dict.fromkeys(missing)))
 
 
@@ -382,10 +394,11 @@ def _evaluate_dates(rule: MatchedRule, formula: str, resolved: dict[str, ValueCa
     days = abs((second.value - first.value).days)
     if "开始" in date_fields[0] and "结束" in date_fields[1]:
         days += 1
+    trace = {"type": "date_interval", "operands": [_value_trace(date_fields[0], first), _value_trace(date_fields[1], second)], "operator": ">=", "actual_days": days, "threshold_days": threshold}
     if days < threshold:
         status = _trigger_status(formula, threshold_match.start(), threshold_match.end())
-        return _status_result(rule, status, f"日期间隔为 {days} 天，低于规则要求的 {threshold} 天。", findings=[_finding(second, f"日期间隔不足 {threshold} 天")], metrics={"days": days, "threshold_days": threshold})
-    return _status_result(rule, Status.PASS, f"日期间隔为 {days} 天，满足不少于 {threshold} 天的要求。", metrics={"days": days, "threshold_days": threshold})
+        return _status_result(rule, status, f"日期间隔为 {days} 天，低于规则要求的 {threshold} 天。", findings=[_finding(second, f"日期间隔不足 {threshold} 天")], metrics={"structured_checks": [trace]})
+    return _status_result(rule, Status.PASS, f"日期间隔为 {days} 天，满足不少于 {threshold} 天的要求。", metrics={"structured_checks": [trace]})
 
 
 def _value_candidates(rule: MatchedRule) -> list[ValueCandidate]:
@@ -443,29 +456,32 @@ def _evaluate_supported(rule: MatchedRule, formula: str, resolved: dict[str, Val
         missing = list(dict.fromkeys(value for result in insufficient for value in result.missing_inputs))
         return _status_result(rule, Status.INSUFFICIENT_INPUT, "正则尚未定位到部分预设字段。", missing=missing)
     if results and all(result.status == Status.PASS for result in results):
-        return _status_result(rule, Status.PASS, "所有从重点排查情形/法规依据派生的可解析结构化子条件均检查通过。", metrics={"evaluated_subchecks": len(results)})
+        checks = [check for result in results for check in result.metrics.get("structured_checks", [])]
+        return _status_result(rule, Status.PASS, "所有从重点排查情形/法规依据派生的可解析结构化子条件均检查通过。", metrics={"evaluated_subchecks": len(results), "structured_checks": checks})
     return _status_result(rule, Status.WARNING, "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。", metrics={"requires_review": True})
 
 
 def evaluate_structured(rule: MatchedRule, *, enable_semantic_aliases: bool = False) -> RuleResult:
     """正则提取数值；模型可选地只负责把近义字段映射到正则候选位置。"""
     if not rule.evidence:
-        return _status_result(rule, Status.WARNING, "内容匹配阶段未定位到结构化检查原文，不能据此认定输入资料缺失。", metrics={"reason": "evidence_not_retrieved"})
+        return _status_result(rule, Status.WARNING, "内容匹配阶段未定位到结构化检查原文，不能据此认定输入资料缺失。", metrics={"reason": "evidence_not_retrieved", "structured_executor": "regex"})
     formula = _derived_plan(rule)
+    def complete(result: RuleResult) -> RuleResult:
+        return replace(result, metrics={**result.metrics, "structured_executor": "regex", "derived_plan": formula.splitlines()})
     if not formula:
-        return _evaluate_supported(rule, formula)
+        return complete(_evaluate_supported(rule, formula))
     fields = _expected_numeric_fields(rule, formula)
     candidates = _value_candidates(rule)
     if enable_semantic_aliases and fields and len(candidates) > 1:
         try:
             resolved = resolve_field_values(rule, fields, candidates)
         except Exception as exc:
-            return _status_result(rule, Status.WARNING, "预设字段未能与原文中的近义字段可靠对应，需人工复核。", metrics={"requires_review": True, "field_mapping_error": f"{type(exc).__name__}: {exc}"})
+            return complete(_status_result(rule, Status.WARNING, "预设字段未能与原文中的近义字段可靠对应，需人工复核。", metrics={"requires_review": True, "field_mapping_error": f"{type(exc).__name__}: {exc}"}))
         result = _evaluate_supported(rule, formula, resolved)
         if result.status == Status.INSUFFICIENT_INPUT:
-            return _status_result(rule, Status.WARNING, "正则已扫描证据，语义字段映射后仍无法取得全部操作数；这不等同于缺少规则输入。", metrics={"requires_review": True, "resolved_fields": sorted(resolved)})
-        return replace(result, metrics={**result.metrics, "semantic_field_aliases": sorted(resolved)})
+            return complete(_status_result(rule, Status.WARNING, "正则已扫描证据，语义字段映射后仍无法取得全部操作数；这不等同于缺少规则输入。", metrics={"requires_review": True, "resolved_fields": sorted(resolved)}))
+        return complete(replace(result, metrics={**result.metrics, "semantic_field_aliases": sorted(resolved)}))
     result = _evaluate_supported(rule, formula)
     if result.status == Status.INSUFFICIENT_INPUT:
-        return _status_result(rule, Status.WARNING, "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。", metrics={"requires_review": True, "unresolved_fields": result.missing_inputs})
-    return result
+        return complete(_status_result(rule, Status.WARNING, "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。", metrics={"requires_review": True, "unresolved_fields": result.missing_inputs}))
+    return complete(result)

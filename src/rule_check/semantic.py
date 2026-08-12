@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 
 from config import settings
 from .. import llm
 from ..rule_parts import legal_basis, rule_description
 from ..rule_schema import Finding, MatchedRule, RuleResult, Status
+from .json_output import extract_json_object
 
-_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _ALLOWED_STATUSES = {Status.VIOLATION, Status.WARNING, Status.PASS, Status.INSUFFICIENT_INPUT}
 
 SYSTEM_PROMPT = """你是招标文件合规审查器。rule_raw（重点排查情形）决定审查主题；legal_basis_reference 是可参考的法规依据，可补充具体法律要求、数值和期限；description_reference 只用于帮助理解规则适用场景，不得单独据此新增阈值、条件或缺失输入；check_method 仅表示检查路线。严格依据规则和证据作答，不生成 Python 代码，不补充未提供的事实。
@@ -29,25 +28,6 @@ SYSTEM_PROMPT = """你是招标文件合规审查器。rule_raw（重点排查�
 class SemanticEvaluation:
     result: RuleResult
     attempts: int
-
-
-def _parse_json(raw: str) -> dict:
-    fenced = _JSON_BLOCK.search(raw)
-    if fenced:
-        value = json.loads(fenced.group(1).strip())
-        if isinstance(value, dict):
-            return value
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(raw):
-        if char != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(raw[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-    raise ValueError("LLM 输出中没有可解析的 JSON 对象")
 
 
 def _payload(rule: MatchedRule) -> dict:
@@ -149,7 +129,7 @@ def evaluate_semantic(rule: MatchedRule) -> SemanticEvaluation:
         prompt = f"/no_think\n请审查以下规则与证据。{correction}\n输入：{payload}"
         try:
             raw = llm.chat(prompt, system=SYSTEM_PROMPT, temperature=0.0, max_tokens=settings.semantic_max_tokens)
-            return SemanticEvaluation(_to_result(rule, _parse_json(raw)), attempt)
+            return SemanticEvaluation(_to_result(rule, extract_json_object(raw)), attempt)
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
     raise RuntimeError(f"语义判定连续失败 {settings.semantic_max_retries + 1} 次：{last_error}")

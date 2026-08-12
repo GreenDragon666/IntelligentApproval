@@ -63,6 +63,26 @@ class DecisionEngineTest(unittest.TestCase):
         self.assertIn("结果合理", report.rules[0].result.analysis)
         explain.assert_called_once_with(case.rules[0], deterministic)
 
+    @patch("src.engine.evaluate_semantic")
+    @patch("src.engine.evaluate_structured")
+    def test_structured_requires_review_uses_semantic_adjudication(self, evaluate_structured, evaluate_semantic) -> None:
+        case = self._case()
+        case.rules[0] = replace(case.rules[0], check_method="结构化数据检查")
+        initial = RuleResult(rule_id=1, status=Status.WARNING, summary="正则未取得完整操作数", metrics={"requires_review": True})
+        final = RuleResult(rule_id=1, status=Status.PASS, summary="语义复核未发现违规", analysis="证据没有触发规则限制。", confidence=0.8)
+        evaluate_structured.return_value = initial
+        evaluate_semantic.return_value = SemanticEvaluation(final, 1)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            report = run_case(case, cache_dir=temporary)
+
+        run = report.rules[0]
+        self.assertEqual(run.structured_result, initial)
+        self.assertEqual(run.result.status, Status.PASS)
+        self.assertTrue(run.result.metrics["structured_fallback"])
+        self.assertEqual(run.result.metrics["structured_status"], "warning")
+        self.assertEqual(run.error, "")
+
 
 if __name__ == "__main__":
     unittest.main()

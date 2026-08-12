@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -11,8 +10,7 @@ from config import settings
 from .. import llm
 from ..rule_parts import legal_basis
 from ..rule_schema import MatchedRule
-
-_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+from .json_output import extract_json_object
 
 
 @dataclass(frozen=True)
@@ -24,25 +22,6 @@ class ValueCandidate:
     evidence_index: int
     quote: str
     context: str
-
-
-def _parse_json(raw: str) -> dict:
-    fenced = _JSON_BLOCK.search(raw)
-    if fenced:
-        value = json.loads(fenced.group(1).strip())
-        if isinstance(value, dict):
-            return value
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(raw):
-        if char != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(raw[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-    raise ValueError("字段语义映射输出中没有 JSON 对象")
 
 
 def resolve_field_values(rule: MatchedRule, fields: list[str], candidates: list[ValueCandidate]) -> dict[str, ValueCandidate]:
@@ -74,7 +53,7 @@ value_candidates 已由正则找到，每个 <VALUE> 代表该候选的值位置
 {json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
 '''
     raw = llm.chat(prompt, system="你是字段别名映射器，只能在给定正则候选中选择位置。", temperature=0.0, max_tokens=512, base_url=settings.llm_base_url, model=settings.llm_model, api_key=settings.llm_api_key)
-    data = _parse_json(raw)
+    data = extract_json_object(raw, label="字段语义映射输出")
     mappings = data.get("mappings")
     if not isinstance(mappings, list):
         raise ValueError("字段语义映射缺少 mappings 数组")

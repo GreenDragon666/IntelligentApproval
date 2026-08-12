@@ -52,7 +52,7 @@ class DecisionCache:
             return None
         return RuleResult.from_dict(data["result"]), data
 
-    def save(self, rule: MatchedRule, result: RuleResult, *, executor: str, attempts: int, error: str = "") -> Path:
+    def save(self, rule: MatchedRule, result: RuleResult, *, executor: str, attempts: int, error: str = "", structured_result: RuleResult | None = None, analysis_error: str = "", analysis_raw: str = "") -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.path(rule)
         if path.is_file():
@@ -69,6 +69,9 @@ class DecisionCache:
             "executor": executor,
             "attempts": attempts,
             "error": error,
+            "analysis_error": analysis_error,
+            "analysis_raw": analysis_raw,
+            "structured_result": structured_result.to_dict() if structured_result else None,
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "result": result.to_dict(),
         }

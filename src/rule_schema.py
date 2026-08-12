@@ -241,8 +241,11 @@ class RuleRun:
     cache_key: str = ""
     cached: bool = False
     attempts: int = 0
+    structured_result: RuleResult | None = None
     result: RuleResult | None = None
     review: ReviewResult | None = None
+    analysis_error: str = ""
+    analysis_raw: str = ""
     error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -254,8 +257,11 @@ class RuleRun:
             "cache_key": self.cache_key,
             "cached": self.cached,
             "attempts": self.attempts,
+            "structured_result": self.structured_result.to_dict() if self.structured_result else None,
             "result": self.result.to_dict() if self.result else None,
             "review": self.review.to_dict() if self.review else None,
+            "analysis_error": self.analysis_error,
+            "analysis_raw": self.analysis_raw,
             "error": self.error,
         }
 
@@ -290,6 +296,7 @@ class ApprovalReport:
             "overall": self.overall,
             "summary": {
                 **counts,
+                "analysis_error": sum(bool(run.analysis_error) for run in self.rules),
                 "pipeline_error": sum(bool(run.error) for run in self.rules),
             },
             "rules": [run.to_dict() for run in self.rules],

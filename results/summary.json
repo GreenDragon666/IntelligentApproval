@@ -1,0 +1,1074 @@
+{
+  "case_id": "report_1",
+  "source_file": "招标文件1.pdf",
+  "overall": "violation",
+  "summary": {
+    "violation": 3,
+    "warning": 16,
+    "pass": 20,
+    "insufficient_input": 2,
+    "error": 0,
+    "pipeline_error": 18
+  },
+  "rules": [
+    {
+      "rule_id": 1,
+      "rule_raw": "对招标文件存在的表意不清、前后矛盾等错误，招标人未作出澄清或修改，或者仅向部分潜在投标人作出澄清或修改",
+      "check_method": "结构化数据检查+大模型分析",
+      "executor": "structured",
+      "cache_key": "rule_1_2337fede21ee5254",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 1,
+        "status": "warning",
+        "summary": "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。",
+        "analysis": "",
+        "legal_basis": "《招标投标法》第二十三条：招标人对已发出的招标文件进行必要的澄清或者修改的，应当在招标文件要求提交投标文件截止时间至少十五日前，以书面形式通知所有招标文件收受人。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 2,
+      "rule_raw": "项目需求描述是否清晰，避免模糊或歧义。",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_2_95dd8131cd52b6de",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 2,
+        "status": "pass",
+        "summary": "项目需求描述清晰，未发现模糊或歧义。",
+        "analysis": "证据中未出现模糊词汇如'适当'、'合理'、'视情况'、'酌情'等，且未发现与发改委立项批复内容不一致的情况。项目需求描述通过引用前附表的方式，保持了清晰和具体。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 3,
+      "rule_raw": "是否明确且合法，避免模糊表述（如“招标人有权废标”需细化情形）。",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_3_250300d15be810b3",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 3,
+        "status": "pass",
+        "summary": "未发现违规表述",
+        "analysis": "招标文件中未出现赋予招标人过大自由裁量权的模糊表述，如“有权”、“酌情”、“视情况”等，且所有条款均明确具体情形，符合《招标投标法》和《招标投标法实施条例》的相关规定。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 4,
+      "rule_raw": "是否存在表述模糊可能引发争议的内容（如“同等条件优先”“其他类似业绩”）。",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_4_4b46affd32da142f",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 4,
+        "status": "pass",
+        "summary": "未发现表述模糊可能引发争议的内容",
+        "analysis": "审查的证据中未出现如“同等条件优先”“其他类似业绩”等模糊表述，且未发现可能引发争议的模糊内容。规则要求明确判定标准，但证据中未涉及相关模糊表述，因此未触发违规。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条第（六）项：依法必须进行招标的项目非法限定潜在投标人或者投标人的所有制形式或者组织形式。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 5,
+      "rule_raw": "是否公开透明，评分标准是否量化（如价格分权重、技术分细则）。如评分标准模糊：“技术方案优秀得10分”未细化评分依据。",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_5_01c336de0c72079b",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 5,
+        "status": "violation",
+        "summary": "评分标准未量化，存在主观性词汇",
+        "analysis": "证据中提到的评分标准使用了如'设计范围明确'、'方案完整、合理'等主观性词汇，且未明确量化评分依据，不符合规则要求的量化评分标准。根据《招标投标法》第十九条和《招标投标法实施条例》第四十九条，评标标准应具体明确，避免主观性描述。",
+        "legal_basis": "《招标投标法》第十九条：招标人应当根据招标项目的特点和需要编制招标文件。招标文件应当包括招标项目的技术要求、对投标人资格审查的标准、投标报价要求和评标标准等所有实质性要求和条件以及拟签订合同的主要条款。《招标投标法实施条例》第四十九条：评标委员会成员应当依照招标投标法和本条例的规定，按照招标文件规定的评标标准和方法，客观、公正地对投标文件提出评审意见。",
+        "findings": [
+          {
+            "evidence_index": 2,
+            "quote": "设计方案评分记录表\n\n设计方案评分记录表\n\n项目名称：\n\n招标编号：\n\n投标人名称（代\n\n序号   评分要素  标准分值          评分标准          码）及评分结果\n\n设计范围明确，设计工作内容具体，针对各工作内容\n\n提出了重点、关键点分析，与项目建设结合紧密，4\n\n≤分值≤6分；",
+            "reason": "该评分标准使用了'设计范围明确'等主观性词汇，且未明确量化评分依据，不符合规则要求的量化评分标准。"
+          }
+        ],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 6,
+      "rule_raw": "是否明确具体验收方法和标准，避免主观性表述。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_6_5d3667fa44fc0379",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 6,
+        "status": "pass",
+        "summary": "验收方法和标准明确，未发现违规情况。",
+        "analysis": "招标文件中未直接提及验收方法和标准的具体内容，但根据《招标投标法》第十九条和《招标投标法实施条例》第三十二条，验收标准应明确且不设置不合理条件。在证据中，未发现关于验收方法和标准的模糊或主观性表述，因此未发现违规。",
+        "legal_basis": "《招标投标法》第十九条：招标文件应当包括招标项目的技术要求。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。验收标准不明确属于设置不合理条件。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 7,
+      "rule_raw": "招标的资质资格、技术条件、商务条件等与项目审批、核准、备案文件相矛盾，或者明显超出项目实际需要",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_7_d702a3d466e2f98d",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 7,
+        "status": "insufficient_input",
+        "summary": "未提供项目审批、核准、备案文件内容，无法判断是否与招标文件矛盾",
+        "analysis": "规则要求审查招标文件中的资质资格、技术条件、商务条件是否与项目审批、核准、备案文件相矛盾，但未提供相关审批文件内容，无法进行有效比对。因此，无法确定是否存在违规情况。",
+        "legal_basis": "《招标投标法实施条例》第十四条：招标项目按照国家有关规定需要履行项目审批、核准手续的，其招标范围、招标方式、招标组织形式应当报项目审批、核准部门审批、核准。第二十三条：招标人编制的资格预审文件、招标文件的内容违反法律、行政法规的强制性规定，违反公开、公平、公正和诚实信用原则，影响资格预审结果或者潜在投标人投标的，依法必须进行招标的项目的招标人应当在修改资格预审文件或者招标文件后重新招标。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.5,
+        "missing_inputs": [
+          "项目审批、核准、备案文件内容"
+        ]
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 8,
+      "rule_raw": "是否合理，符合行业常规或项目实际。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_8_54c3d9b7893a9d77",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 8,
+        "status": "insufficient_input",
+        "summary": "未提供足够的信息以判断是否符合行业常规或项目实际。",
+        "analysis": "规则要求审查资质条件、技术条件或商务条件与行业常规标准的偏离度是否超过30%。然而，证据中未提供具体的行业常规标准或项目实际的详细信息，因此无法进行有效判断。",
+        "legal_basis": "《招标投标法》第十八条：招标人可以根据招标项目本身的要求，在招标公告或者投标邀请书中，要求潜在投标人提供有关资质证明文件和业绩情况，并对潜在投标人进行资格审查；但是不得以不合理的条件限制或者排斥潜在投标人。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.5,
+        "missing_inputs": [
+          "行业常规标准",
+          "项目实际的具体信息"
+        ]
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 9,
+      "rule_raw": "质保期、响应时间等要求是否合理，与行业惯例一致。",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_9_f910615e30d443e1",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 9,
+        "status": "warning",
+        "summary": "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。",
+        "analysis": "",
+        "legal_basis": "1. 《建设工程质量管理条例》第四十条：建设工程最低保修期限为：\n   - 基础设施工程、地基基础工程和主体结构工程：设计文件规定的合理使用年限\n   - 屋面防水工程、有防水要求的卫生间/房间和外墙面的防渗漏：5年\n   - 供热与供冷系统：2个采暖期/供冷期\n   - 电气管线、给排水管道、设备安装和装修工程：2年\n2. 《建设工程质量保证金管理办法》（建质〔2017〕138号）第八条：缺陷责任期一般为1年，最长不超过2年，由发承包双方在合同中约定。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 10,
+      "rule_raw": "以特定行政区域、特定行业的业绩、荣誉奖励等作为资格审查标准或评标标准",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_10_45fb5fe3675e6ab1",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 10,
+        "status": "pass",
+        "summary": "未发现违规情形",
+        "analysis": "审查发现招标文件中未出现以特定行政区域或特定行业作为资格审查或评标标准的表述，符合《招标投标法》和《招标投标法实施条例》的相关规定。",
+        "legal_basis": "《招标投标法》第十八条：招标人不得以不合理的条件限制或者排斥潜在投标人。《招标投标法实施条例》第三十二条第（三）项：依法必须进行招标的项目以特定行政区域或者特定行业的业绩、奖项作为加分条件或者中标条件。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 11,
+      "rule_raw": "资格条件中不能限定地区",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_11_e14f1b30131f695d",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 11,
+        "status": "pass",
+        "summary": "未发现资格条件中限定地区的情形",
+        "analysis": "审查发现资格条件中未出现任何地域限制性表述，如'本地'、'本省市'、'本区'等，符合规则要求。",
+        "legal_basis": "《招标投标法》第十八条：招标人不得以不合理的条件限制或者排斥潜在投标人。《招标投标法实施条例》第三十二条第（四）项：依法必须进行招标的项目对潜在投标人或者投标人采取不同的资格审查或者评标标准。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 12,
+      "rule_raw": "是否违反国家或地方政策（如地方保护条款、歧视性条款）。",
+      "check_method": "政策库匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_12_ca81ab965703a8ad",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 12,
+        "status": "pass",
+        "summary": "未发现违反国家或地方政策的条款。",
+        "analysis": "审查了招标文件中关于地方保护、歧视性条款及政策冲突的内容，未发现明确违反《招标投标法》和《招标投标法实施条例》的表述。所有条款均符合法规要求，未发现排斥外地投标人或歧视性内容。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 13,
+      "rule_raw": "以使用特定的专利、商标、品牌等作为资格审查标准或评标标准",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_13_37bf63c389325976",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 13,
+        "status": "pass",
+        "summary": "未发现违规内容",
+        "analysis": "审查的证据中未出现与特定专利、商标、品牌等相关的表述，符合《招标投标法》和《招标投标法实施条例》的相关规定。规则中提及的关键词如‘专利号’、‘商标’、‘品牌名称’等均未在证据中出现，因此未触发违规判定。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条第（五）项：限定或者指定特定的专利、商标、品牌、原产地或者供应商。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 14,
+      "rule_raw": "是否存在倾向性表述（如限定特定品牌、技术参数唯一性）或排斥潜在投标人的不合理资质要求。",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_14_cf63017c7df2fa35",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 14,
+        "status": "pass",
+        "summary": "未发现倾向性表述或不合理资质要求",
+        "analysis": "审查发现招标文件中未出现限定特定品牌、技术参数唯一性或排斥潜在投标人的不合理资质要求。所有资质要求均指向投标人须知前附表，未直接设定倾向性条件。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 15,
+      "rule_raw": "技术参数是否明确且无倾向性，是否引用特定专利或标准。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_15_57c45e93f9dce84c",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 15,
+        "status": "pass",
+        "summary": "未发现技术参数引用特定专利或标准的违规情况",
+        "analysis": "审查发现招标文件中未引用任何特定专利或标准，技术参数描述符合《招标投标法》和《招标投标法实施条例》的要求，未出现倾向性内容。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条第（五）项：限定或者指定特定的专利、商标、品牌、原产地或者供应商。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 16,
+      "rule_raw": "将特定第三方机构出具的评价（检测、认证）结果作为资格审查标准或评标标准",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_16_7e505a58d2ecd6a9",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 16,
+        "status": "pass",
+        "summary": "未发现将特定第三方机构出具的评价结果作为资格审查或评标标准的情形",
+        "analysis": "审查的证据中未提及任何特定第三方机构的评价或检测结果被用作资格审查或评标标准。所有评审标准均基于招标文件的通用要求和投标人须知，未涉及指定机构的证明材料要求。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 17,
+      "rule_raw": "要求第三方机构在开展评价（检测、认证）时对特定投标人或潜在投标人予以倾斜、照顾",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_17_884d03b7a3fd07c0",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 17,
+        "status": "pass",
+        "summary": "未发现违规行为",
+        "analysis": "审查的证据中未发现任何关于第三方机构在开展评价（检测、认证）时对特定投标人或潜在投标人予以倾斜、照顾的表述。所有内容均符合《招标投标法》和《招标投标法实施条例》的相关规定。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 18,
+      "rule_raw": "以投标人在项目所在地设立分公司或办事处、拥有一定办公面积、缴纳社会保险等作为资格审查标准或评标标准",
+      "check_method": "关键词匹配+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_18_c61dad2a46e86a2c",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 18,
+        "status": "pass",
+        "summary": "未发现违规情况",
+        "analysis": "审查的证据中未发现以设立分公司或办事处、办公面积、本地社保等作为资格审查或评标标准的内容。所有资格要求和评标标准均未涉及上述不合理条件。",
+        "legal_basis": "《招标投标法》第十八条：招标人不得以不合理的条件限制或者排斥潜在投标人。《招标投标法实施条例》第三十二条第（七）项：以其他不合理条件限制、排斥潜在投标人或者投标人。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 19,
+      "rule_raw": "对不同投标人的投标保证金、履约保证金的交纳形式提出不同要求",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_19_e85990411536cfd3",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 19,
+        "status": "warning",
+        "summary": "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。",
+        "analysis": "",
+        "legal_basis": "《招标投标法实施条例》第二十六条：招标人在招标文件中要求投标人提交投标保证金的，投标保证金不得超过招标项目估算价的2%。《招标投标法》第十八条：招标人不得以不合理的条件限制或者排斥潜在投标人。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 20,
+      "rule_raw": "投标保证金不得超过招标项目估算价的 2%，投标保证金超过80万",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_20_9dd641089df02302",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 20,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "《招标投标法实施条例》第二十六条：招标人在招标文件中要求投标人提交投标保证金的，投标保证金不得超过招标项目估算价的2%。投标保证金有效期应当与投标有效期一致。《工程建设项目施工招标投标办法》第三十七条：投标保证金一般不得超过投标总价的2%，最高不得超过80万元人民币。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "投标保证金金额",
+            "招标项目估算价",
+            "投标总价",
+            "最高金额"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 21,
+      "rule_raw": "履约保证金金额不得超过合同金额的 10%",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_21_e415e8c61576ad39",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 21,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "《招标投标法》第四十六条第二款：招标文件要求中标人提交履约保证金的，中标人应当提交。《招标投标法实施条例》第五十八条：履约保证金不得超过中标合同金额的10%。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "履约保证金金额",
+            "合同金额",
+            "中标合同金额"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 22,
+      "rule_raw": "质量保证金超过 3%",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_22_446b53afc9565241",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 22,
+        "status": "warning",
+        "summary": "预设字段未能与原文中的近义字段可靠对应，需人工复核。",
+        "analysis": "",
+        "legal_basis": "《建设工程质量保证金管理办法》（建质〔2017〕138号）第七条：发包人应按照合同约定方式预留保证金，保证金总预留比例不得高于工程价款结算总额的3%。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "field_mapping_error": "ValueError: 字段语义映射缺少 mappings 数组"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 23,
+      "rule_raw": "金额、缴纳方式、退还条件是否符合法规要求（如不得超预算2%）。",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_23_c94f9c28f6587503",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 23,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第二十六条：招标人在招标文件中要求投标人提交投标保证金的，投标保证金不得超过招标项目估算价的2%。\n2. 《工程建设项目施工招标投标办法》（七部委第30号令）第三十七条：投标保证金一般不得超过投标总价的2%，最高不得超过80万元人民币。\n3. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第三十三条：投标保证金不得超过采购项目预算金额的2%。\n4. 《关于完善建设工程担保制度的指导意见》：推广使用银行保函、工程保证保险、担保公司保函等替代现金保证金。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "投标保证金金额",
+            "招标项目估算价",
+            "投标总价",
+            "采购项目预算金额",
+            "最高金额"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 24,
+      "rule_raw": "是否合理合法（如预付款比例、进度款支付节点）。",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_24_7e67ac20e41e4f9d",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 24,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《建设工程价款结算暂行办法》（财建〔2004〕369号）：建设工程预付款比例一般不低于合同金额的10%，不超过合同金额的30%。\n2. 《关于进一步加大政府采购支持中小企业力度的通知》（财库〔2022〕19号）：对中小企业合同，预付款比例可提高到不低于合同金额的30%（工程项目不低于40%），在合同签订后即支付。\n3. 《关于进一步提高政府采购透明度和采购效率相关事项的通知》（财库〔2023〕39号）：鼓励采购人将合同预付款比例提高到30%以上。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "预付款金额",
+            "合同金额",
+            "待检查金额"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 25,
+      "rule_raw": "招标文件收到反映不合理限制条件的异议（质疑）或者投诉合计 3 次以上",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_25_5dd4b28d368fa4cb",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 25,
+        "status": "warning",
+        "summary": "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。",
+        "analysis": "",
+        "legal_basis": "《招标投标法实施条例》第六十条：投标人或者其他利害关系人认为招标投标活动不符合法律、行政法规规定的，可以自知道或者应当知道之日起10日内向有关行政监督部门投诉。第六十二条：行政监督部门处理投诉，有权查阅、复制有关文件、资料，调查有关情况。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 26,
+      "rule_raw": "是否包含投标人须知、技术规范、合同条款、评标标准、投标文件格式等核心内容。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_26_976e6ed651ce0814",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 26,
+        "status": "pass",
+        "summary": "招标文件包含所有核心内容，未发现违规",
+        "analysis": "根据证据0，招标文件明确列出了投标人须知、评标办法、合同条款及格式、投标文件格式等核心内容，符合《招标投标法》第十九条和《标准施工招标文件》（2007年版）的要求。其他证据也未发现缺失核心内容的情况。",
+        "legal_basis": "《招标投标法》第十九条：招标人应当根据招标项目的特点和需要编制招标文件。招标文件应当包括招标项目的技术要求、对投标人资格审查的标准、投标报价要求和评标标准等所有实质性要求和条件以及拟签订合同的主要条款。《标准施工招标文件》（2007年版）对招标文件章节结构有明确规定。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 27,
+      "rule_raw": "如投标函、授权书、资格证明、保证金要求、技术方案模板等是否齐全。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_27_9e2bd976ff2104b3",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 27,
+        "status": "pass",
+        "summary": "招标文件内容齐全，符合要求。",
+        "analysis": "根据证据，投标文件包含投标函、授权委托书、资格审查资料、设计方案等必要内容，符合《招标投标法》第十九条关于招标文件应包括的实质性要求和条件。未发现缺失必要内容。",
+        "legal_basis": "《招标投标法》第十九条：招标文件应当包括招标项目的技术要求、对投标人资格审查的标准、投标报价要求和评标标准等所有实质性要求和条件以及拟签订合同的主要条款。投标文件格式属于招标文件必备内容。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 28,
+      "rule_raw": "是否符合标准合同范本，违约责任、争议解决方式是否明确。如合同条款缺失：未明确变更、索赔处理方式",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_28_fa6ffb5290f16f74",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 28,
+        "status": "violation",
+        "summary": "争议解决方式未明确",
+        "analysis": "证据0中提到争议解决方式为友好协商不成后可向仲裁委员会申请仲裁或向有管辖权的人民法院提起诉讼，但未明确选择仲裁或诉讼，因此争议解决方式不明确。根据《民法典》合同编，争议解决方式属于合同必备条款，应明确约定。",
+        "legal_basis": "《招标投标法》第四十六条：招标人和中标人应当自中标通知书发出之日起三十日内，按照招标文件和中标人的投标文件订立书面合同。合同的标的、价款、质量、履行期限等主要条款应当与招标文件和中标人的投标文件的内容一致。《民法典》合同编：合同条款应当明确、具体，违约责任、争议解决方式属于合同必备条款。",
+        "findings": [
+          {
+            "evidence_index": 0,
+            "quote": "发包人和设计人在履行合同中发生争议的，可以友好协商解决。合同当事人友好协商解\n\n决不成的，可在专用合同条款中约定下列一种方式解决：\n\n（1）向约定的仲裁委员会申请仲裁；\n\n（2）向有管辖权的人民法院提起诉讼。",
+            "reason": "该原文未明确选择仲裁或诉讼，导致争议解决方式不明确，违反了合同必备条款的要求。"
+          }
+        ],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 29,
+      "rule_raw": "是否明确最低价中标或综合评分法，是否符合项目性质（如服务类项目不宜最低价中标）。",
+      "check_method": "结构化数据检查+大模型分析",
+      "executor": "structured",
+      "cache_key": "rule_29_d3037015975f78f9",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 29,
+        "status": "warning",
+        "summary": "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法》第四十一条：中标人的投标应当能够最大限度地满足招标文件中规定的各项综合评价标准，或者能够满足招标文件的实质性要求并且经评审的投标价格最低（但不得低于成本）。\n2. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第五十三条：评标方法分为最低评标价法和综合评分法。\n3. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第五十四条：最低评标价法适用于技术、服务等标准统一的采购项目。\n4. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第五十五条：综合评分法中的价格分值——货物项目不得低于30%，服务项目不得低于10%。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 30,
+      "rule_raw": "技术方案、设计成果的知识产权归属是否明确。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_30_49a863b5e04c782a",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 30,
+        "status": "violation",
+        "summary": "知识产权归属未明确，违反招标文件合规要求。",
+        "analysis": "证据中提到‘设计人因本合同出具的全部设计文件，知识产权归发包人所有’，但未明确知识产权的使用范围或转让条件，违反了规则要求。根据《招标投标法实施条例》第三十二条第（五）项，知识产权归属条款不得具有倾向性或排斥性，而该条款未明确使用范围或转让条件，存在合规风险。",
+        "legal_basis": "《招标投标法》第二十条：招标文件不得要求或者标明特定的生产供应者以及含有倾向或者排斥潜在投标人的其他内容。《招标投标法实施条例》第三十二条第（五）项：限定或者指定特定的专利、商标、品牌、原产地或者供应商。知识产权归属条款不得具有倾向性或排斥性。",
+        "findings": [
+          {
+            "evidence_index": 0,
+            "quote": "设计人因本合同出具的全部设计文件，知识产权归发包人所有。",
+            "reason": "该原文未明确知识产权的使用范围或转让条件，违反了规则要求。"
+          }
+        ],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 31,
+      "rule_raw": "是否要求投标人承担不合理保密责任。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_31_ffe7ce0489657535",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 31,
+        "status": "pass",
+        "summary": "未发现不合理保密责任的违规情形",
+        "analysis": "招标文件中关于保密责任的条款未涉及不合理扩大保密范围、保密期限过长或违约金过高等情形，符合相关法规要求。",
+        "legal_basis": "1. 《招标投标法》第二十二条：招标人不得向他人透露已获取招标文件的潜在投标人的名称、数量以及可能影响公平竞争的有关招标投标的其他情况。\n2. 《招标投标法》第三十七条：评标委员会成员的名单在中标结果确定前应当保密。\n3. 《招标投标法》第三十八条：招标人应当采取必要的措施，保证评标在严格保密的情况下进行。\n4. 《招标投标法》第四十四条：评标委员会成员和参与评标的有关工作人员不得透露对投标文件的评审和比较、中标候选人的推荐情况以及与评标有关的其他情况。\n5. 《民法典》合同编：合同条款应遵循公平原则，不得显失公平。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 32,
+      "rule_raw": "如政府采购是否落实中小企业扶持、节能环保政策（需提供证明材料）。",
+      "check_method": "大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_32_f8194ff081417e8a",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 32,
+        "status": "pass",
+        "summary": "未发现违反中小企业扶持及节能环保政策的证据",
+        "analysis": "招标文件中未提及中小企业扶持政策或节能环保政策的具体落实措施，但根据规则要求，未提供证明材料并不直接构成违规，需进一步核实是否在其他部分提供了相关证明。当前证据未明确违反规则。",
+        "legal_basis": "1. 《政府采购促进中小企业发展管理办法》（财库〔2020〕46号）第六条：预留份额通过整体或部分专门面向中小企业采购、联合体（中小企业份额≥30%）、分包（中小企业份额≥30%）等措施落实。\n2. 《关于进一步加大政府采购支持中小企业力度的通知》（财库〔2022〕19号）：\n   - 200万元以下货物/服务、400万元以下工程：原则上全部预留给中小企业\n   - 超过门槛的：预留该部分预算总额的30%以上专门面向中小企业，其中小微企业不低于60%\n   - 价格优惠：货物/服务项目小微企业价格扣除10%-20%，工程项目6%-10%\n3. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第五条：采购人应当在招标投标活动中落实节约能源、保护环境、扶持中小企业发展等政策。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.9,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 33,
+      "rule_raw": "预审程序、标准是否符合法规，避免排斥潜在投标人。如资质门槛过高，要求投标人注册资本超出项目实际需求。",
+      "check_method": "规则判断+大模型分析",
+      "executor": "semantic_llm",
+      "cache_key": "rule_33_dbbac5918922f75b",
+      "cached": false,
+      "attempts": 1,
+      "result": {
+        "rule_id": 33,
+        "status": "pass",
+        "summary": "未发现资质门槛或注册资本要求超出项目实际需求的违规情况。",
+        "analysis": "审查发现招标文件中未明确提及注册资本的具体数值或与项目实际需求的对比关系。同时，资质要求部分仅提及需符合相关法规和项目需求，未发现明显超出或不合理限制的条款。因此，未发现违反《招标投标法》及《招标投标法实施条例》的情形。",
+        "legal_basis": "《招标投标法》第十八条：招标人不得以不合理的条件限制或者排斥潜在投标人。《招标投标法实施条例》第三十二条：招标人不得以不合理的条件限制、排斥潜在投标人或者投标人。《建筑业企业资质标准》（建市〔2014〕159号）对资质等级与项目规模的匹配关系有明确规定。",
+        "findings": [],
+        "metrics": {
+          "executor": "semantic_llm"
+        },
+        "confidence": 0.95,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": ""
+    },
+    {
+      "rule_id": 34,
+      "rule_raw": "中标结果公示期限（如至少3个工作日）及渠道是否合法。",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_34_a8cdfd154d569a54",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 34,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第五十四条：依法必须进行招标的项目，招标人应当自收到评标报告之日起3日内公示中标候选人，公示期不得少于3日。\n2. 《招标公告和公示信息发布管理办法》（国家发改委令第10号）：依法必须招标项目的招标公告和公示信息应当在\"中国招标投标公共服务平台\"或者项目所在地省级电子招标投标公共服务平台发布。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "公示开始日期",
+            "公示结束日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 35,
+      "rule_raw": "资格预审文件下载周期审查",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_35_58b308252213a909",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 35,
+        "status": "pass",
+        "summary": "所有从重点排查情形/法规依据派生的可解析结构化子条件均检查通过。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第十六条：资格预审文件或者招标文件的发售期不得少于5日。\n2. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第十八条：提供期限自招标公告发布之日起计算不得少于5个工作日。",
+        "findings": [],
+        "metrics": {
+          "evaluated_subchecks": 1,
+          "semantic_field_aliases": [
+            "资审文件发售开始日期",
+            "资审文件发售结束日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 36,
+      "rule_raw": "招标文件下载周期审查",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_36_f04176d23939bbf9",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 36,
+        "status": "pass",
+        "summary": "所有从重点排查情形/法规依据派生的可解析结构化子条件均检查通过。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第十六条：招标文件的发售期不得少于5日。\n2. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第十八条：提供期限自招标公告发布之日起计算不得少于5个工作日。",
+        "findings": [],
+        "metrics": {
+          "evaluated_subchecks": 1,
+          "semantic_field_aliases": [
+            "招标文件发售开始日期",
+            "招标文件发售结束日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 37,
+      "rule_raw": "资格预审申请周期审查",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_37_7ee427d5a7b4dc9b",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 37,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第十六条：资格预审文件或者招标文件的发售期不得少于5日。注：法规虽未直接规定申请截止距发售结束的间隔，但发售期本身不少于5日即为保障投标人编制申请文件的时间。\n2. 实践惯例：资格预审申请截止日期应晚于发售结束日期，且留有合理时间供投标人编制申请文件（建议不少于5日）。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "资审文件发售结束日期",
+            "资审申请截止日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 38,
+      "rule_raw": "依法必须招标项目投标截止周期审查",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_38_61378b7d1b6d2743",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 38,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法》第二十四条：招标人应当确定投标人编制投标文件所需要的合理时间；但是，依法必须进行招标的项目，自招标文件开始发出之日起至投标人提交投标文件截止之日止，最短不得少于二十日。\n2. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）无直接规定投标截止距文件发出的最短时间，但依据《政府采购竞争性磋商采购方式管理暂行办法》第十条，磋商文件发出后不少于10日。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "招标文件发出日期",
+            "投标截止日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 39,
+      "rule_raw": "资审文件澄清修改时间异常",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_39_8dc0a34e5bc771f3",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 39,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第二十一条：澄清或者修改的内容可能影响资格预审申请文件编制的，招标人应当在提交资格预审申请文件截止时间至少3日前，以书面形式通知所有获取资格预审文件的潜在投标人；不足3日的，招标人应当顺延提交资格预审申请文件的截止时间。\n2. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第二十七条：不足3日的，采购人应当顺延提交资格预审申请文件的截止时间。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "资审澄清修改发布日期",
+            "资格预审申请截止日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 40,
+      "rule_raw": "招标文件澄清修改时间异常",
+      "check_method": "结构化数据检查",
+      "executor": "structured",
+      "cache_key": "rule_40_0c0377a4afda8fb1",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 40,
+        "status": "warning",
+        "summary": "正则未能可靠取得全部结构化操作数；这不等同于缺少规则输入。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法》第二十三条：招标人对已发出的招标文件进行必要的澄清或者修改的，应当在招标文件要求提交投标文件截止时间至少十五日前，以书面形式通知所有招标文件收受人。\n2. 《招标投标法实施条例》第二十一条：澄清或者修改的内容可能影响投标文件编制的，招标人应当在投标截止时间至少15日前通知所有潜在投标人；不足15日的，招标人应当顺延提交投标文件的截止时间。\n3. 《政府采购货物和服务招标投标管理办法》（财政部令第87号）第二十七条：不足15日的，采购人应当顺延提交投标文件的截止时间。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true,
+          "unresolved_fields": [
+            "招标文件澄清修改发布日期",
+            "投标截止日期"
+          ]
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "rule_id": 41,
+      "rule_raw": "招标文件内需标明资金来源",
+      "check_method": "结构化数据检查+大模型分析",
+      "executor": "structured",
+      "cache_key": "rule_41_8e158011894d60a7",
+      "cached": false,
+      "attempts": 0,
+      "result": {
+        "rule_id": 41,
+        "status": "warning",
+        "summary": "重点排查情形未提供当前通用执行器可确认的定量条件，需进行语义或人工复核。",
+        "analysis": "",
+        "legal_basis": "1. 《招标投标法实施条例》第十四条：招标项目按照国家有关规定需要履行项目审批、核准手续的，其招标范围、招标方式、招标组织形式应当报项目审批、核准部门审批、核准。\n2. 《招标投标法实施条例》第九条：招标项目需要履行项目审批、核准手续的，应当先履行审批、核准手续。\n3. 《工程建设项目施工招标投标办法》（七部委第30号令）第八条：依法必须招标的工程建设项目，应当具备下列条件：……（二）已取得项目审批、核准或备案文件；……资金来源已经落实。",
+        "findings": [],
+        "metrics": {
+          "requires_review": true
+        },
+        "confidence": 1.0,
+        "missing_inputs": []
+      },
+      "review": null,
+      "error": "LLM 结果分析失败: RuntimeError: LLM 结果分析连续失败 2 次：JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    }
+  ]
+}

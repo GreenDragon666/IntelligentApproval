@@ -32,7 +32,8 @@ MatchedRule.check_method
   │    → 正则提取金额/比例/日期
   │    → 字段名不一致时由 Qwen 选择正则候选位置
   │    → 全局代码执行计算
-  │    → Qwen 解释结果是否有证据支持，但不修改状态
+  │    ├─ 完成计算 → Qwen 解释结果是否有证据支持，但不修改状态
+  │    └─ requires_review → Qwen 执行完整语义兜底判定，保留结构化初判
   │
   └─ 其他检查方式
        → semantic.py
@@ -51,7 +52,8 @@ MatchedRule.check_method
 
 embedding 只改进步骤二召回，不决定步骤三状态。非结构化规则的同一次 Qwen 调用同时返回状态、
 简要结论和分析；结构化状态由确定性程序给出，随后由 `explainer.py` 增加分析与一致性意见，模型意见
-不会覆盖原状态。
+不会覆盖已完成的确定性状态。结构化执行器无法完成时，`structured_result` 保留原 warning 和原因，
+最终 `result` 由语义兜底形成；两者同时写入缓存和报告。
 
 ## 并发和 vLLM
 
@@ -63,8 +65,9 @@ embedding 只改进步骤二召回，不决定步骤三状态。非结构化规�
 - `MATCHING_WORKERS=4`
 - `SEMANTIC_WORKERS=4`
 
-语义判定固定 `/no_think`、`temperature=0`、短输出。静态系统提示放在共同前缀中，便于 vLLM
-前缀缓存；不同规则并发到达后可由 vLLM 连续批处理。
+语义判定固定 `/no_think`、`temperature=0`、短输出。`/no_think` 不保证响应中完全没有空的
+`<think></think>` 包装，因此字段映射、语义判定、结果解释和可选复核共用宽容 JSON 提取器。静态
+系统提示放在共同前缀中，便于 vLLM 前缀缓存；不同规则并发到达后可由 vLLM 连续批处理。
 
 `src/llm.py` 的 httpx 客户端设置 `trust_env=False`，本机 vLLM 请求不会读取 SOCKS/HTTP 代理。
 
