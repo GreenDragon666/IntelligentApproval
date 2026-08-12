@@ -8,15 +8,15 @@ from dataclasses import dataclass
 
 from config import settings
 from .. import llm
-from ..rule_parts import legal_basis
+from ..rule_parts import legal_basis, rule_description
 from ..rule_schema import Finding, MatchedRule, RuleResult, Status
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _ALLOWED_STATUSES = {Status.VIOLATION, Status.WARNING, Status.PASS, Status.INSUFFICIENT_INPUT}
 
-SYSTEM_PROMPT = """你是招标文件合规审查器。rule_raw（重点排查情形）决定审查主题；legal_basis_reference 是可参考的法规依据，可补充具体法律要求、数值和期限；check_method 仅表示检查路线。严格依据这两项和证据作答，不生成 Python 代码，不补充未提供的事实。
+SYSTEM_PROMPT = """你是招标文件合规审查器。rule_raw（重点排查情形）决定审查主题；legal_basis_reference 是可参考的法规依据，可补充具体法律要求、数值和期限；description_reference 只用于帮助理解规则适用场景，不得单独据此新增阈值、条件或缺失输入；check_method 仅表示检查路线。严格依据规则和证据作答，不生成 Python 代码，不补充未提供的事实。
 必须返回一个 JSON 对象，不得输出 Markdown 或思考过程。JSON 字段：
-{"status":"violation|warning|pass|insufficient_input","summary":"简短结论","legal_basis":"规则中已有法规依据，无法确定则空字符串","findings":[{"evidence_index":0,"quote":"证据中的连续原文","reason":"该原文如何触发规则"}],"confidence":0到1,"missing_inputs":["缺失资料"]}
+{"status":"violation|warning|pass|insufficient_input","summary":"简短结论","analysis":"2至4句话说明证据与规则的关系、为什么该状态合理以及判断边界","legal_basis":"规则中已有法规依据，无法确定则空字符串","findings":[{"evidence_index":0,"quote":"证据中的连续原文","reason":"该原文如何触发规则"}],"confidence":0到1,"missing_inputs":["缺失资料"]}
 要求：
 1. findings 中的 quote 必须逐字来自对应 evidence.text，不能改写。
 2. 只有 rule_raw 或 legal_basis_reference 明确要求的外部文件或比较对象未提供时，才能返回 insufficient_input；不得根据公式、开发说明或预设字段推断缺失输入。
@@ -72,6 +72,7 @@ def _payload(rule: MatchedRule) -> dict:
         "rule_id": rule.rule_id,
         "check_method": rule.check_method,
         "rule_raw": rule.rule_raw,
+        "description_reference": rule_description(rule.rule_text),
         "legal_basis_reference": legal_basis(rule.rule_text),
         "evidence": evidence_items,
     }
@@ -121,10 +122,15 @@ def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
     confidence = float(data.get("confidence", 0.0))
     if confidence < 0 or confidence > 1:
         raise ValueError("confidence 必须在 0 到 1 之间")
+    summary = str(data.get("summary", "")).strip() or "本地模型未提供结论摘要。"
+    analysis = str(data.get("analysis", "")).strip()
+    if not analysis:
+        raise ValueError("LLM 判定缺少 analysis")
     return RuleResult(
         rule_id=rule.rule_id,
         status=status,
-        summary=str(data.get("summary", "")).strip() or "本地模型未提供结论摘要。",
+        summary=summary,
+        analysis=analysis,
         legal_basis=legal_basis(rule.rule_text),
         findings=findings,
         metrics={"executor": "semantic_llm"},

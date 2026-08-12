@@ -30,8 +30,14 @@ class Settings:
     semantic_max_evidence_chars: int = int(os.getenv("SEMANTIC_MAX_EVIDENCE_CHARS", "16000"))
     semantic_max_chars_per_evidence: int = int(os.getenv("SEMANTIC_MAX_CHARS_PER_EVIDENCE", "8000"))
 
-    # —— 语义相似度 embedding（步骤三可选；当前确定性 checker 不强制）——
+    # —— 步骤二 embedding 混合召回 ——
     embed_model: str = os.getenv("LOCAL_EMBED_MODEL", "BAAI/bge-m3")
+    embed_device: str = os.getenv("LOCAL_EMBED_DEVICE", "")
+    embed_batch_size: int = int(os.getenv("LOCAL_EMBED_BATCH_SIZE", "16"))
+    embed_weight: float = float(os.getenv("LOCAL_EMBED_WEIGHT", "0.45"))
+    embed_chunk_chars: int = int(os.getenv("LOCAL_EMBED_CHUNK_CHARS", "1400"))
+    embed_chunk_overlap: int = int(os.getenv("LOCAL_EMBED_CHUNK_OVERLAP", "200"))
+    embed_strict: bool = os.getenv("LOCAL_EMBED_STRICT", "0").lower() in {"1", "true", "yes", "on"}
 
     # —— 可选二次复核 ——
     review_max_evidence_chars: int = int(os.getenv("REVIEW_MAX_EVIDENCE_CHARS", "20000"))

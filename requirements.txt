@@ -2,6 +2,8 @@
 openai>=1.40              # 对接本地 vLLM 的 OpenAI 兼容接口，不出网
 httpx>=0.27               # 连接池；代码显式禁用环境代理以直连本机 vLLM
 vllm                      # 仅模型服务器环境需要，体积大，按需安装
+sentence-transformers>=3.0 # 步骤二本地 BGE-M3 embedding 混合召回
+numpy>=1.26                # 批量向量点积与章节相似度矩阵
 
 # —— 步骤一、二 PDF 文本/书签抽取（没有时可降级使用系统 pdftotext）——
 PyMuPDF>=1.24

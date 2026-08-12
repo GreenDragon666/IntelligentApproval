@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import settings
-from .rule_check import DecisionCache, evaluate_semantic, evaluate_structured, is_structured_method
+from .rule_check import DecisionCache, evaluate_semantic, evaluate_structured, explain_result, is_structured_method
 from .rule_check.cache import decision_key
 from .rule_check.reviewer import review as review_result
 from .rule_schema import ApprovalReport, MatchedCase, MatchedRule, RuleResult, RuleRun, Status
@@ -20,6 +20,21 @@ def _select_rules(case: MatchedCase, rule_ids: Iterable[int] | None) -> list[Mat
     if rule_ids is None:
         return case.rules
     return [case.get_rule(rule_id) for rule_id in rule_ids]
+
+
+def _add_explanation(rule: MatchedRule, run: RuleRun) -> bool:
+    """为已有结果补分析；失败时保留原判定，避免解释服务覆盖确定性结果。"""
+    if run.result is None or run.result.analysis:
+        return True
+    try:
+        explanation = explain_result(rule, run.result)
+    except Exception as exc:
+        message = f"LLM 结果分析失败: {type(exc).__name__}: {exc}"
+        run.error = f"{run.error}；{message}" if run.error else message
+        return False
+    run.result = explanation.result
+    run.attempts += explanation.attempts
+    return True
 
 
 def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force_recheck: bool, llm_review: bool, rollback: bool) -> RuleRun:
@@ -37,18 +52,22 @@ def _run_one(rule: MatchedRule, *, cache: DecisionCache, enable_llm: bool, force
             run.result, metadata = cached
             run.cached = True
             run.attempts = int(metadata.get("attempts", 0))
+            if enable_llm and not run.result.analysis and _add_explanation(rule, run):
+                cache.save(rule, run.result, executor=executor, attempts=run.attempts, error=run.error)
             if not llm_review:
                 return run
 
     if run.result is None and not rule.evidence:
         run.result = RuleResult(rule_id=rule.rule_id, status=Status.WARNING, summary="内容匹配阶段未定位到相关原文，当前不能自动判断；这不代表规则要求的输入资料缺失。", confidence=0.0, metrics={"reason": "evidence_not_retrieved"})
-        cache.save(rule, run.result, executor=executor, attempts=0)
-        return run
+        if enable_llm:
+            _add_explanation(rule, run)
 
     if run.result is None:
         try:
             if structured:
                 run.result = evaluate_structured(rule, enable_semantic_aliases=enable_llm)
+                if enable_llm:
+                    _add_explanation(rule, run)
             elif enable_llm:
                 evaluation = evaluate_semantic(rule)
                 run.result = evaluation.result

@@ -1,4 +1,4 @@
-"""使用本地 Qwen 对字符级召回结果进行规则—章节重排。"""
+"""使用本地 Qwen 对字符与 embedding 混合召回结果进行规则—章节重排。"""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def select_candidates(
     *,
     max_selected: int = 2,
 ) -> list[SectionCandidate]:
-    """让本地 Qwen 从字符召回候选中选择相关章节，也允许全部拒绝。"""
+    """让本地 Qwen 从混合召回候选中选择相关章节，也允许全部拒绝。"""
     if not candidates:
         return []
     payload = {
@@ -79,7 +79,9 @@ def select_candidates(
                 "title": candidate.section.title,
                 "pdf_pages": [candidate.section.pdf_start, candidate.section.pdf_end],
                 "text": _candidate_excerpt(rule, candidate.section.text, settings.llm_candidate_chars),
-                "lexical_score": round(candidate.score, 6),
+                "retrieval_score": round(candidate.score, 6),
+                "lexical_score": round(candidate.lexical_score, 6) if candidate.lexical_score is not None else None,
+                "embedding_score": round(candidate.embedding_score, 6) if candidate.embedding_score is not None else None,
             }
             for index, candidate in enumerate(candidates)
         ],

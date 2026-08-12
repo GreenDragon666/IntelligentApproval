@@ -19,8 +19,10 @@ from ..rule_schema import (
 from ..dir_extr import extract_document, split_sections
 from ..page_schema import DocumentSection, SectionCandidate
 from .llm_matcher import select_candidates
-from .retrieval import LexicalSectionMatcher
+from .retrieval import HybridSectionMatcher, LexicalSectionMatcher
 from .rules import load_policy_rules
+
+MAX_EVIDENCE_COUNT = 3
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -49,13 +51,13 @@ def _to_evidence(section: DocumentSection, source_file: str, page_basis: str) ->
     )
 
 
-def _lexical_selection(
+def _retrieval_selection(
     candidates: list[SectionCandidate],
     *,
     evidence_count: int,
     minimum_score: float,
 ) -> list[SectionCandidate]:
-    """无模型或模型降级时按阈值选择前 N 个字符召回候选。"""
+    """无重排或模型降级时按融合分数阈值选择前 N 个召回候选。"""
     return [
         candidate
         for candidate in candidates
@@ -73,16 +75,17 @@ def prepare_case(
     document_page_1_pdf_page: int | None = None,
     max_section_pages: int = 8,
     candidate_count: int = 8,
-    evidence_count: int = 2,
+    evidence_count: int = MAX_EVIDENCE_COUNT,
     minimum_score: float = 0.03,
+    use_embedding: bool = True,
     use_llm: bool = False,
     strict_llm: bool = False,
     match_workers: int | None = None,
 ) -> MatchedCase:
     """生成可直接交给 ``main.py`` 的正式 ``rules_matched.json``。
 
-    ``use_llm=False`` 时全程不访问模型，直接采用字符级召回结果。启用 LLM 后，
-    本地 Qwen 只对 top-k 候选重排；调用失败时默认降级到字符级结果，只有
+    默认先融合字符 TF-IDF 与本地 embedding；``use_embedding=False`` 时只用字符召回。
+    启用 LLM 后，本地 Qwen 只对 top-k 候选重排；调用失败时默认降级到召回结果，只有
     ``strict_llm=True`` 才中止任务。
     """
 
@@ -92,6 +95,8 @@ def prepare_case(
         raise ValueError("candidate_count 和 evidence_count 必须大于 0")
     if evidence_count > candidate_count:
         raise ValueError("evidence_count 不得大于 candidate_count")
+    if evidence_count > MAX_EVIDENCE_COUNT:
+        raise ValueError(f"evidence_count 最大为 {MAX_EVIDENCE_COUNT}")
     if minimum_score < 0:
         raise ValueError("minimum_score 不得小于 0")
     if match_workers is not None and match_workers < 1:
@@ -116,14 +121,29 @@ def prepare_case(
         raise ValueError("文档未生成可匹配章节")
 
     policy_rules = load_policy_rules(rules_path)
-    matcher = LexicalSectionMatcher(sections)
     matched_rules: list[MatchedRule] = []
     match_artifacts: list[dict[str, Any]] = []
 
-    ranked = [(rule, matcher.rank(rule, top_k=candidate_count)) for rule in policy_rules]
+    embedding_error = ""
+    if use_embedding:
+        try:
+            hybrid_ranked = HybridSectionMatcher(sections).rank_all(policy_rules, top_k=candidate_count)
+        except Exception as exc:
+            embedding_error = f"{type(exc).__name__}: {exc}"
+            if settings.embed_strict:
+                raise RuntimeError(f"步骤二 embedding 召回失败: {embedding_error}") from exc
+            print(f"步骤二 embedding 不可用，已降级为字符召回: {embedding_error}", flush=True)
+            matcher = LexicalSectionMatcher(sections)
+            ranked = [(rule, matcher.rank(rule, top_k=candidate_count)) for rule in policy_rules]
+        else:
+            ranked = list(zip(policy_rules, hybrid_ranked))
+    else:
+        matcher = LexicalSectionMatcher(sections)
+        ranked = [(rule, matcher.rank(rule, top_k=candidate_count)) for rule in policy_rules]
+    retrieval_method = "hybrid" if use_embedding and not embedding_error else "lexical"
     selections: dict[int, tuple[list[SectionCandidate], str, str]] = {}
     for rule, candidates in ranked:
-        selections[rule.rule_id] = (_lexical_selection(candidates, evidence_count=evidence_count, minimum_score=minimum_score), "lexical", "")
+        selections[rule.rule_id] = (_retrieval_selection(candidates, evidence_count=evidence_count, minimum_score=minimum_score), retrieval_method, "")
     if use_llm:
         workers = max(1, match_workers or settings.matching_workers)
         errors: list[tuple[int, Exception]] = []
@@ -136,16 +156,16 @@ def prepare_case(
                 try:
                     selected = future.result()
                     if selected:
-                        selections[rule.rule_id] = (selected, "local_qwen", "")
+                        selections[rule.rule_id] = (selected, f"local_qwen_{retrieval_method}", "")
                     else:
                         previous, _method, _error = selections[rule.rule_id]
                         # Qwen 的“全部拒绝”不能抹掉第一阶段已经达到阈值的候选。
-                        # 保留字符召回证据，交给步骤三结合 rule_raw 再判断。
-                        selections[rule.rule_id] = (previous, "local_qwen_empty_lexical_fallback", "")
+                        # 保留第一阶段召回证据，交给步骤三结合 rule_raw 再判断。
+                        selections[rule.rule_id] = (previous, f"local_qwen_empty_{retrieval_method}_fallback", "")
                 except Exception as exc:
                     llm_error = f"{type(exc).__name__}: {exc}"
                     previous, _method, _error = selections[rule.rule_id]
-                    selections[rule.rule_id] = (previous, "lexical_fallback", llm_error)
+                    selections[rule.rule_id] = (previous, f"{retrieval_method}_fallback", llm_error)
                     errors.append((rule.rule_id, exc))
                 completed += 1
                 interval = max(1, total // 10)
@@ -157,6 +177,7 @@ def prepare_case(
 
     for rule, candidates in ranked:
         selected, selection_method, llm_error = selections[rule.rule_id]
+        selected = selected[:min(evidence_count, MAX_EVIDENCE_COUNT)]
 
         matched_rules.append(
             MatchedRule(
@@ -182,6 +203,8 @@ def prepare_case(
         }
         if llm_error:
             artifact["llm_error"] = llm_error
+        if embedding_error:
+            artifact["embedding_error"] = embedding_error
         match_artifacts.append(artifact)
 
     case = MatchedCase(
@@ -223,6 +246,10 @@ def prepare_case(
                     extracted.page_number_detection.to_dict() if extracted.page_number_detection else None
                 ),
                 "use_llm": use_llm,
+                "use_embedding": use_embedding,
+                "retrieval_method": retrieval_method,
+                "embedding_model": settings.embed_model if use_embedding else None,
+                "embedding_error": embedding_error or None,
                 "strict_llm": strict_llm,
                 "candidate_count": candidate_count,
                 "evidence_count": evidence_count,

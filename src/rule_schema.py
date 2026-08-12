@@ -196,6 +196,7 @@ class RuleResult:
     rule_id: int
     status: Status
     summary: str
+    analysis: str = ""
     legal_basis: str = ""
     findings: list[Finding] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
@@ -208,6 +209,7 @@ class RuleResult:
             rule_id=int(data["rule_id"]),
             status=Status(data["status"]),
             summary=str(data.get("summary", "")),
+            analysis=str(data.get("analysis", "")),
             legal_basis=str(data.get("legal_basis", "")),
             findings=[Finding.from_dict(item) for item in data.get("findings", [])],
             metrics=dict(data.get("metrics") or {}),

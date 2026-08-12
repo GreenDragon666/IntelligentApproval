@@ -7,7 +7,7 @@ import re
 
 from config import settings
 from .. import llm
-from ..rule_parts import legal_basis
+from ..rule_parts import legal_basis, rule_description
 from ..rule_schema import MatchedRule, ReviewResult, RuleResult
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
@@ -26,7 +26,7 @@ def _evidence(rule: MatchedRule) -> list[dict]:
 
 
 def review(rule: MatchedRule, result: RuleResult) -> ReviewResult:
-    payload = {"rule_id": rule.rule_id, "check_method": rule.check_method, "rule_raw": rule.rule_raw, "legal_basis_reference": legal_basis(rule.rule_text), "evidence": _evidence(rule), "result": result.to_dict()}
+    payload = {"rule_id": rule.rule_id, "check_method": rule.check_method, "rule_raw": rule.rule_raw, "description_reference": rule_description(rule.rule_text), "legal_basis_reference": legal_basis(rule.rule_text), "evidence": _evidence(rule), "result": result.to_dict()}
     raw = llm.chat(f'/no_think\n复核下面的规则校验结果。只返回 JSON：{{"approved":true或false,"feedback":"原因"}}。\n输入：{json.dumps(payload, ensure_ascii=False)}', system="你是招标文件合规校验结果复核员，只检查结论是否与规则和原文一致。", temperature=0.0, max_tokens=512)
     match = _JSON_BLOCK.search(raw)
     data = json.loads((match.group(1) if match else raw).strip())

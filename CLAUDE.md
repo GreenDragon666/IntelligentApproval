@@ -13,6 +13,8 @@
 
 文档输入不允许手工指定 `case_id`。`--one_report_path` 处理单个文档，`--reports_path` 递归
 处理目录下所有支持文档；每个文档自动分配新的 `reports/report_x/` 并复制原文件。
+新的 `--one_report_path`/`--reports_path` 运行必须先覆盖根目录 `reports/`，使其只表示最近一次任务，
+编号从 `report_1` 开始；`--input` 续跑不得清空正在读取的 reports。
 
 ## 硬约束
 
@@ -22,13 +24,15 @@
 - 步骤一、二不得写死义齿、医疗器械、RPS 或特定产品领域词汇。
 - 同伴原始参考代码位于 `references/stage1+2/`，不导入生产调用链，也不随意修改。
 - 不在运行时生成案件专用 Python checker；确定性逻辑必须位于全局执行器。
-- `rule_raw` 决定审查主题；`rule_text` 只允许拆取明确的 `【法规依据】` 作为具体法律要求参考，`【公式】`、开发说明和其他生成块不得参与召回或判定。
+- `rule_raw` 决定审查主题；`rule_text` 的 `【法规依据】` 可作为具体法律要求参考，`【描述】`只可帮助 LLM 理解适用场景、不得单独新增判定条件，`【公式】`、开发说明和其他生成块不得参与召回或判定。
 - “检查方式”包含“结构化数据检查”时必须走确定性执行器；其他方法走语义判定。
 - 结构化阈值和比较方向必须从 `rule_raw + 法规依据` 派生并复核，不得读取生成公式。
 - 结构化字段别名可由本地 LLM 映射，但金额、比例、日期等值必须由正则提取；生成字段未匹配不得直接返回 `insufficient_input`。
+- 步骤二默认使用字符 TF-IDF 与本地 BGE-M3 混合召回，embedding 只决定候选相关度、不决定步骤三状态；每条规则最终 evidence 不得超过3条。
 - `argparse` 的 `add_argument` 调用保持一行，不主动拆成多行排版。
 - Office 文档优先通过 LibreOffice 临时转 PDF；不得覆盖或改写用户原文件。
 - DOCX 无 LibreOffice 时允许 XML 文本降级，DOC/ODT/RTF/WPS 无转换器时必须明确报错。
+- 每次完整规则校验在 `reports/summary_brief.md` 只生成一份运行级简报；每个案件保留详细 `results/summary.md`。所有状态写 LLM 分析和证据位置/双页码，通过规则不复制完整 evidence 原文。
 
 ## 模块归属
 
@@ -54,13 +58,13 @@
 
 ## 本地模型
 
-- 模型：Qwen3-8B；
+- 生成模型：Qwen3-8B；embedding 模型：本地 BGE-M3；
 - 服务脚本：`scripts/serve_vllm_qwen3_8b.sh`；
 - 默认接口：`http://localhost:8001/v1`；
 - served model name：`Qwen3-8B`；
 - 服务端变量使用 `LLM_*`，Python 客户端变量使用 `LOCAL_LLM_*`；
 - 不要在自动测试中启动模型。
-- 步骤二、三默认各并发4个请求；语义判定使用 `/no_think` 和短 JSON 输出。
+- 步骤二、三默认各并发4个请求；语义判定与结果解释使用 `/no_think` 和短 JSON 输出。
 
 ## 常用命令
 

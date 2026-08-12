@@ -56,7 +56,7 @@ def healthcheck() -> dict:
 
 
 class Embedder:
-    """BGE-M3 语义相似度。本地加载，懒加载；步骤三可选。"""
+    """BGE-M3 本地向量编码器；供步骤二批量语义召回。"""
 
     def __init__(self, model_name: str | None = None):
         self.model_name = model_name or settings.embed_model
@@ -64,12 +64,21 @@ class Embedder:
 
     def _lazy(self):
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self.model_name)
+            self._model = _embedding_model(self.model_name, settings.embed_device)
         return self._model
 
+    def encode(self, texts: list[str]):
+        """批量返回已归一化向量；调用方可直接用点积计算余弦相似度。"""
+        return self._lazy().encode(texts, batch_size=settings.embed_batch_size, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False)
+
     def similarity(self, a: str, b: str) -> float:
-        from sentence_transformers import util
-        m = self._lazy()
-        ea, eb = m.encode([a, b], normalize_embeddings=True)
-        return float(util.cos_sim(ea, eb)[0][0])
+        ea, eb = self.encode([a, b])
+        return float(ea @ eb)
+
+
+@lru_cache(maxsize=4)
+def _embedding_model(model_name: str, device: str):
+    """同一进程的批量案件复用一份 embedding 权重，避免逐文件重新加载。"""
+    from sentence_transformers import SentenceTransformer
+    kwargs = {"device": device} if device else {}
+    return SentenceTransformer(model_name, **kwargs)

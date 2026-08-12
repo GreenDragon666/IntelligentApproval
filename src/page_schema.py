@@ -53,9 +53,11 @@ class PolicyRule:
 
 @dataclass(frozen=True)
 class SectionCandidate:
-    """一条政策规则召回的招标章节及其字符级相关分数。"""
+    """一条政策规则召回的章节及字符、向量和融合相关分数。"""
     section: DocumentSection
     score: float
+    lexical_score: float | None = None
+    embedding_score: float | None = None
 
     def to_dict(self) -> dict:
         """输出候选定位和舍入后的分数，不重复写完整章节原文。"""
@@ -64,4 +66,6 @@ class SectionCandidate:
             "pdf_start": self.section.pdf_start,
             "pdf_end": self.section.pdf_end,
             "score": round(self.score, 6),
+            "lexical_score": round(self.lexical_score, 6) if self.lexical_score is not None else None,
+            "embedding_score": round(self.embedding_score, 6) if self.embedding_score is not None else None,
         }

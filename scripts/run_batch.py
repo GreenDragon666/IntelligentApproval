@@ -21,8 +21,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--document-page-1-pdf-page", type=int, help="可选人工覆盖；正文印刷第1页对应的原始/转换 PDF 页，不传时自动检测")
     parser.add_argument("--max-section-pages", type=int, default=8)
     parser.add_argument("--candidate-count", type=int, default=8)
-    parser.add_argument("--evidence-count", type=int, default=2)
+    parser.add_argument("--evidence-count", type=int, default=3, help="每条规则最终保留 evidence 数，最大为3")
     parser.add_argument("--minimum-score", type=float, default=0.03)
+    parser.add_argument("--no-embedding", action="store_true", help="步骤二仅使用字符 TF-IDF 召回")
     parser.add_argument("--use-llm", action="store_true", help="步骤二使用本地模型重排")
     parser.add_argument("--strict-llm", action="store_true", help="步骤二模型失败即终止当前文档")
     parser.add_argument("--match-workers", type=int, help="步骤二并发重排规则数")
@@ -48,7 +49,7 @@ def _main_argv(args: argparse.Namespace) -> list[str]:
     if args.rollback_rules:
         argv.append("--rollback-rules")
         argv.extend(str(rule_id) for rule_id in args.rollback_rules)
-    for enabled, option in ((args.use_llm, "--use-llm"), (args.strict_llm, "--strict-llm"), (args.review, "--review"), (args.no_llm_check, "--no-llm-check"), (args.force_recheck, "--force-recheck"), (args.continue_on_error, "--continue-on-error")):
+    for enabled, option in ((args.no_embedding, "--no-embedding"), (args.use_llm, "--use-llm"), (args.strict_llm, "--strict-llm"), (args.review, "--review"), (args.no_llm_check, "--no-llm-check"), (args.force_recheck, "--force-recheck"), (args.continue_on_error, "--continue-on-error")):
         if enabled:
             argv.append(option)
     return argv

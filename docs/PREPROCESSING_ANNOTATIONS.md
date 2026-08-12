@@ -10,7 +10,7 @@ prepare_case.py::main
       ├─ dir_extr.extract_document     # 多格式适配 + 归一化分页
       ├─ dir_extr.split_sections       # 书签优先，标题规则兜底
       ├─ cont_match.load_policy_rules     # JSON/XLSX政策规则
-      ├─ LexicalSectionMatcher               # 字符TF-IDF top-k
+      ├─ HybridSectionMatcher                # 字符TF-IDF + BGE-M3融合top-k
       ├─ cont_match.select_candidates         # 可选本地Qwen重排/拒绝
       ├─ rule_schema.MatchedCase             # 正式契约校验
       └─ outline/sections/matches/manifest   # 可追溯中间产物
@@ -23,7 +23,7 @@ prepare_case.py::main
 | `PageText` | 一页来源/转换/逻辑页的页码、标签和文本 | 文档提取 → 章节拆分 |
 | `DocumentSection` | 一个可匹配章节的标题、双页码范围和原文 | 章节拆分 → 候选召回/正式 evidence |
 | `PolicyRule` | 从政策表读出的整数序号、原文、逻辑、检查方式、结构化字段和匹配提示 | 规则加载 → 候选召回/正式 rule |
-| `SectionCandidate` | 某规则与某章节及其字符级分数 | 召回 → Qwen 重排/调试产物 |
+| `SectionCandidate` | 某规则与某章节及字符、embedding、融合分数 | 召回 → Qwen 重排/调试产物 |
 | `MatchedCase` | 对外正式 JSON 契约 | 流水线最终输出 |
 
 ## 3. 逐函数说明
@@ -81,6 +81,8 @@ prepare_case.py::main
 | `LexicalSectionMatcher.__init__` | 为章节和标题建立词频、文档频率和 IDF | 对应原 `RpsMatcher.__init__`，但对象改为招标章节 |
 | `_cosine` | 用对数词频和 IDF 计算两个稀疏 Counter 的余弦相似度 | 新增长度归一化，避免长章节天然得高分 |
 | `rank` | 分别计算 rule_raw、法规依据与正文/标题的相似度并加权，返回 top-k 正分候选 | 删除原 RPS 章节和医疗关键词先验 |
+| `_section_chunks` | 将长章节切成有重叠的字符窗口，避免向量模型只看到章节开头 | 新增 embedding 预处理 |
+| `HybridSectionMatcher.rank_all` | 批量编码全部章节切片与规则查询，融合字符/向量分数后返回 top-k | 新增混合召回；批量方式避免逐对调用 |
 
 ### `src/cont_match/llm_matcher.py`
 
@@ -95,7 +97,7 @@ prepare_case.py::main
 |---|---|---|
 | `_write_json` | 建立父目录并以 UTF-8、中文不转义的格式写 JSON | 统一正式输出和调试产物格式 |
 | `_to_evidence` | 将内部 `DocumentSection` 转为正式 `MatchedEvidence` | 负责双页码和文件名映射 |
-| `_lexical_selection` | 无模型或模型失败时，按最低分数选择前 N 个召回候选 | 高召回降级，不负责判断违规 |
+| `_retrieval_selection` | 无重排或模型失败时，按最低融合分数选择前 N 个召回候选 | 高召回降级，不负责判断违规 |
 | `prepare_case` | 串联全部步骤、处理 LLM 严格/降级模式、写正式 JSON 和四类产物 | 步骤一、二唯一业务总入口 |
 
 `prepare_case` 内部阶段：
@@ -103,7 +105,7 @@ prepare_case.py::main
 1. 校验参数；
 2. 提取页文本和目录；
 3. 拆章节并加载规则；
-4. 每条规则执行字符召回；
+4. 批量执行字符 TF-IDF 与 embedding 混合召回；
 5. 可选 Qwen 重排，失败时按参数中止或降级；
 6. 转为 `MatchedRule/MatchedEvidence`；
 7. 先通过 `MatchedCase` 构造校验，再写正式 JSON；
@@ -121,10 +123,12 @@ prepare_case.py::main
 
 | 函数 | 作用 |
 |---|---|
-| `_allocate_report_dir` | 扫描 `report_x`/旧式 `reportx`，原子创建最大编号加一的目录 |
+| `_reset_reports` | 新的单文件/批量任务开始前覆盖根 `reports/`；`--input` 续跑不调用 |
+| `_allocate_report_dir` | 在本次运行的干净 `reports/` 中依次原子创建 `report_1`、`report_2` 等目录 |
 | `_discover_documents` | 递归发现 `--reports_path` 下所有支持文档，并排除自动输出目录 |
 | `_process_document` | 复制输入文档、运行步骤一二，并按参数继续执行步骤三 |
-| `_write_report` | 调用审批引擎并写 `summary.json`、`summary.md` |
+| `_write_report` | 调用审批引擎并写案件级 `summary.json`、详细 `summary.md` |
+| `_write_brief` | 将本次完成的一个或多个案件写成唯一的根目录 `reports/summary_brief.md` |
 | `_validate_args` | 校验三种输入模式和模型/生成参数组合 |
 | `main` | 处理已有 JSON、单个文档或目录中的全部支持文档 |
 

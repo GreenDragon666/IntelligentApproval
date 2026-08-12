@@ -14,18 +14,18 @@ JSON/XLSX 提供；第三步读取同一行的“检查方式”，不再让大�
   │
   ▼
 步骤二 src/cont_match  ◀── --policy-rules 规则 JSON/XLSX
-  字符召回 + 可选并发 Qwen 重排
+  字符 TF-IDF + BGE-M3 混合召回 + 可选并发 Qwen 重排
   │
   ▼
 rules_matched.json（包含 check_method、structured_fields）
   │
   ▼
 步骤三 src/rule_check
-  ├─ 检查方式包含“结构化数据检查” → 全局确定性执行器
-  └─ 其他检查方式                → 并发 Qwen 语义判定
+  ├─ 检查方式包含“结构化数据检查” → 全局确定性执行器 → Qwen 解释
+  └─ 其他检查方式                → 并发 Qwen 语义判定与解释
   │
   ▼
-decision_cache + summary.json + summary.md
+reports/summary_brief.md + 各案件 decision_cache/summary.json/summary.md
 ```
 
 代码布局：
@@ -38,7 +38,8 @@ src/
 │   ├── methods.py           # 规范化“检查方式”并路由
 │   ├── structured.py        # 金额/比例/日期正则提取与确定性计算
 │   ├── field_resolver.py    # 预设字段与正则候选位置的语义别名映射
-│   ├── semantic.py          # 短 JSON 语义判定
+│   ├── semantic.py          # 一次调用完成短 JSON 语义判定与解释
+│   ├── explainer.py         # 为确定性结果补充 LLM 分析，不修改结果
 │   ├── cache.py             # 中断续跑、历史版本、回滚
 │   ├── reviewer.py          # 可选第二次 LLM 复核
 │   └── report.py
@@ -85,18 +86,25 @@ scripts/run_batch.py         # 批量入口
 | `政策库匹配+大模型分析` | `semantic_llm` |
 
 `rule_raw`（重点排查情形）决定审查主题；程序会从 `rule_text` 中单独拆出明确标记的
-`【法规依据】`，用于补充具体法律概念、数值和期限。`【公式】`、开发说明和其他生成的量化块不参与
-召回或判定，`structured_fields` 只作字段别名提示。结构化操作直接从 `rule_raw + 法规依据` 派生。
+`【法规依据】`，用于补充具体法律概念、数值和期限。`【描述】`只作为 LLM 理解适用场景的说明，
+不能单独新增阈值、条件或缺失输入。`【公式】`、开发说明和其他生成的量化块不参与召回或判定，
+`structured_fields` 只作字段别名提示。结构化操作直接从 `rule_raw + 法规依据` 派生。
 
 确定性执行器是全局代码，不按案件、规则生成 Python。金额、百分比和日期值始终由正则提取。
 当预设字段名没有出现在证据中时，本地 Qwen 只负责将该字段映射到正则已经发现的候选位置，模型
 看不到候选的实际数值，也不负责读取或计算数值。映射后仍不完整时返回 `warning` 供人工复核，
 不会把生成字段的缺失写成 `insufficient_input`。
 
-步骤二以 `rule_raw` 为主查询、法规依据为辅助查询做字符 TF-IDF 召回，再由 Qwen 在候选章节中
-重排。公式和结构化字段不参与召回；长章节发送给 Qwen 前会从全文截取与两项查询重叠最高的窗口，不再
-固定只看章节开头。如果 Qwen 全部拒绝候选，达到字符分数阈值的候选会作为兜底 evidence 保留，
-避免步骤三把一次空选误解成输入资料缺失。
+当前步骤三不是 embedding 相似度阈值判定：非结构化规则直接由 Qwen 读取 `evidence`、`rule_raw`、
+`【描述】`和`【法规依据】`，一次返回状态、简要结论和可解释分析；结构化规则先由正则和全局代码给出状态，
+再调用一次 Qwen 解释该结果是否有证据支持。解释模型不能覆盖确定性状态，只会在指标中写入
+`llm_analysis_consistent` 和分析置信度。embedding 只参与步骤二召回，不决定步骤三状态。
+
+步骤二以 `rule_raw` 为主查询、法规依据为辅助查询，同时计算字符 TF-IDF 和 BGE-M3 embedding
+相似度，默认按55%字符分数、45%向量分数融合。长章节先按1400字符、重叠200字符切片，章节向量分数
+取最相关切片，避免只编码章节开头。融合召回 top-k 后由 Qwen 重排，最终每条规则最多保留3个 evidence。
+公式和结构化字段不参与召回；如果 Qwen 全部拒绝候选，达到融合分数阈值的候选会作为兜底 evidence
+保留，避免步骤三把一次空选误解成输入资料缺失。
 
 ## 3. 启动 vLLM
 
@@ -121,14 +129,25 @@ bash scripts/serve_vllm_qwen3_8b.sh --tensor-parallel-size 1
 export LOCAL_LLM_BASE_URL=http://127.0.0.1:8001/v1
 export LOCAL_LLM_MODEL=Qwen3-8B
 export LOCAL_LLM_API_KEY=EMPTY
+export LOCAL_EMBED_MODEL="/home/zyl/LLM Library/bge-m3"
+export LOCAL_EMBED_DEVICE=cpu
 
 python -c "from src.llm import healthcheck; print(healthcheck())"
 ```
+
+步骤二默认加载本地 BGE-M3，服务器环境需安装 `sentence-transformers`，并把 `LOCAL_EMBED_MODEL`
+指向本地权重目录。`LOCAL_EMBED_DEVICE` 可设为 `cpu` 或 `cuda:0`；若想让 embedding 使用物理 GPU 2，
+可在业务终端用 `CUDA_VISIBLE_DEVICES=2 LOCAL_EMBED_DEVICE=cuda:0 python main.py ...`。vLLM 仍在自己的
+服务进程中使用物理 GPU 3，两者互不改变。embedding 初始化失败时默认打印原因并降级为纯字符召回；
+设置 `LOCAL_EMBED_STRICT=1` 可改为立即终止，`--no-embedding` 可显式关闭。
 
 `src/llm.py` 使用复用连接池并设置 `trust_env=False`，连接本机 vLLM 时不会误用服务器上的
 SOCKS/HTTP 代理。
 
 ## 4. 完整运行
+
+每次新的单文件或批量完整运行都会先删除并重建根目录 `reports/`。该目录始终只表示最近一次运行，
+案件编号也从 `report_1` 重新开始；如需保留上一轮结果，请在启动新任务前自行复制整个目录。
 
 ```bash
 python main.py \
@@ -138,8 +157,9 @@ python main.py \
   --strict-llm
 ```
 
-`--use-llm` 仍只控制步骤二的候选重排。步骤三中，非结构化规则默认使用本地 Qwen 判定；如只想
-测试确定性结构化规则，可增加 `--no-llm-check`。
+`--use-llm` 仍只控制步骤二的候选重排。步骤三默认使用本地 Qwen：非结构化规则由一次调用完成
+判定和解释，结构化规则在确定性计算后调用一次模型解释。如只想测试纯确定性计算，可增加
+`--no-llm-check`；此时非结构化规则无法自动判定，结构化规则仍执行但不生成 LLM 分析。
 
 批量运行：
 
@@ -178,7 +198,7 @@ python main.py \
 服务脚本默认设置 `--max-num-seqs 16` 并启用 prefix caching，足以容纳业务端4～8路并发；
 `LLM_MAX_NUM_SEQS` 只是服务端并发上限，实际并发仍由 `MATCHING_WORKERS`/`SEMANTIC_WORKERS` 控制。
 
-步骤三语义输出使用 `/no_think`，默认最多768 token，并只允许一次格式修正重试：
+步骤三判定和解释均使用 `/no_think`，默认最多768 token；语义判定只允许一次格式修正重试：
 
 | 环境变量 | 默认值 | 作用 |
 |---|---:|---|
@@ -189,25 +209,42 @@ python main.py \
 | `SEMANTIC_MAX_EVIDENCE_CHARS` | `16000` | 单规则发送的证据字符总量 |
 | `LOCAL_LLM_MAX_CONNECTIONS` | `16` | HTTP 连接池上限 |
 | `LOCAL_LLM_TIMEOUT` | `180` | 单次请求超时秒数 |
+| `LOCAL_EMBED_MODEL` | `BAAI/bge-m3` | embedding 模型名或本地权重目录 |
+| `LOCAL_EMBED_DEVICE` | 自动 | embedding 运行设备，如 `cpu`、`cuda:0` |
+| `LOCAL_EMBED_BATCH_SIZE` | `16` | embedding 批量编码大小 |
+| `LOCAL_EMBED_WEIGHT` | `0.45` | 融合分数中的 embedding 权重 |
+| `LOCAL_EMBED_CHUNK_CHARS` | `1400` | 长章节向量切片字符数 |
+| `LOCAL_EMBED_CHUNK_OVERLAP` | `200` | 相邻向量切片重叠字符数 |
 
-`--review` 会对每条结果再调用一次模型，默认不要开启；它用于抽查或高风险任务，而不是常规加速路径。
+一般语义规则调用一次模型；结构化规则调用一次结果解释，若字段名需要近义映射，可能再增加一次
+仅选择正则候选位置的调用。`--review` 会在这些常规分析之外再调用一次独立模型复核，默认不要开启；
+它用于抽查或高风险任务。
 
-## 6. 中断续跑、重检和回滚
+## 6. 输出报告、中断续跑和回滚
 
-每个案件默认生成：
+一次批量或单文件运行统一生成：
 
 ```text
-reports/report_5/
-├── 招标文件2.pdf
-├── matched/rules_matched.json
-├── preprocessing/
-├── decision_cache/
-│   ├── rule_<id>_<digest>.json
-│   └── history/
-└── results/
-    ├── summary.json
-    └── summary.md
+reports/
+├── summary_brief.md              # 本次运行唯一执法简报，汇总全部招标文件
+├── report_1/
+│   ├── 招标文件1.pdf
+│   ├── matched/rules_matched.json
+│   ├── preprocessing/
+│   ├── decision_cache/
+│   │   ├── rule_<id>_<digest>.json
+│   │   └── history/
+│   └── results/
+│       ├── summary.json
+│       └── summary.md             # 当前文件详细报告；含 LLM 分析与证据位置
+└── report_2/
+    └── ...
 ```
+
+`summary_brief.md` 列出每份文件的通过、预警、违规和未完成数量，并按文件列出各状态对应的规则，
+用于执法人员快速浏览。每个案件的 `results/summary.md` 保留执行器、法规依据、指标、错误和证据等
+详细信息。各状态都会记录 LLM 分析以及步骤二证据的章节、PDF页码/文件内页码；通过规则不再复制
+完整 evidence 原文，避免报告过长。违规和预警若有可回引 finding，仍保留短的命中原文。
 
 从已有步骤二结果继续：
 
@@ -216,6 +253,10 @@ python main.py \
   --input reports/report_5/matched/rules_matched.json \
   --policy-rules files/规则.xlsx
 ```
+
+`--input` 属于当前 `reports/` 内的续跑/重检，不会在启动时清空目录，否则会删除它正要读取的 JSON
+和历史缓存；它会更新案件详细报告以及根目录 `reports/summary_brief.md`。新的
+`--one_report_path`/`--reports_path` 任务才会覆盖整个 `reports/`。
 
 已经成功完成的规则会按“规则内容 + 检查方式 + evidence”哈希复用，只有缺失或变化的规则重新执行。
 为旧版 JSON 同时传入 `--policy-rules` 时，程序按 `rule_id` 补齐最新“检查方式”和“结构化数据展示字段”，

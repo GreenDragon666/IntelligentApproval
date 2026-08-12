@@ -13,11 +13,12 @@ from src.cont_match import prepare_case
 from src.cont_match.rules import load_policy_rules
 from src.dir_extr import SUPPORTED_DOCUMENT_EXTENSIONS, is_supported_document
 from src.engine import run_case
-from src.rule_check.report import to_json, to_markdown
-from src.rule_schema import MatchedCase
+from src.rule_check.report import to_brief_markdown, to_json, to_markdown
+from src.rule_schema import ApprovalReport, MatchedCase
 
 
 _REPORT_DIR_PATTERN = re.compile(r"^report_?(\d+)$")
+_BRIEF_NAME = "summary_brief.md"
 
 
 def _default_output(input_path: Path) -> Path:
@@ -65,15 +66,16 @@ def _build_parser() -> argparse.ArgumentParser:
     matching = parser.add_argument_group("步骤二：内容匹配")
     matching.add_argument("--policy-rules", help="政策规则 JSON/XLSX；处理新文档时必填，--input 时可用于刷新检查方式")
     matching.add_argument("--candidate-count", type=int, default=8)
-    matching.add_argument("--evidence-count", type=int, default=2)
+    matching.add_argument("--evidence-count", type=int, default=3, help="每条规则最终保留 evidence 数，最大为3")
     matching.add_argument("--minimum-score", type=float, default=0.03)
+    matching.add_argument("--no-embedding", action="store_true", help="步骤二仅使用字符 TF-IDF 召回，不加载本地 embedding 模型")
     matching.add_argument("--use-llm", action="store_true", help="使用当前本地 Qwen3-8B 服务重排匹配候选")
-    matching.add_argument("--strict-llm", action="store_true", help="匹配模型调用失败时终止，不降级为字符召回")
+    matching.add_argument("--strict-llm", action="store_true", help="匹配模型调用失败时终止，不降级为第一阶段召回")
     matching.add_argument("--match-workers", type=int, help="步骤二并发重排规则数，默认读取 MATCHING_WORKERS")
 
     approval = parser.add_argument_group("步骤三：规则校验与审批")
     approval.add_argument("--rules", nargs="*", type=int, help="只执行指定规则序号")
-    approval.add_argument("--no-llm-check", "--no-generate", dest="no_llm_check", action="store_true", help="禁用步骤三语义规则的本地 LLM 判定；旧名 --no-generate 仍兼容")
+    approval.add_argument("--no-llm-check", "--no-generate", dest="no_llm_check", action="store_true", help="禁用步骤三语义判定、字段别名映射和结果解释；结构化正则仍执行")
     approval.add_argument("--force-recheck", "--force-regenerate", dest="force_recheck", action="store_true", help="忽略当前判定缓存重新检查，并保留上一版本历史")
     approval.add_argument("--review", action="store_true", help="用第二次本地 LLM 调用复核结果；会降低速度")
     approval.add_argument("--check-cache-dir", "--checker-dir", dest="check_cache_dir", help="案件判定缓存目录；旧名 --checker-dir 仍兼容")
@@ -119,7 +121,7 @@ def _discover_documents(reports_path: str | Path, reports_root: str | Path = "re
     return sorted(documents, key=lambda path: str(path).lower())
 
 
-def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace) -> None:
+def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace) -> ApprovalReport:
     """执行规则校验流程并写案件级 JSON/Markdown 报告。"""
     cache_dir = Path(args.check_cache_dir) if args.check_cache_dir else _default_cache(input_path)
     report = run_case(case, rule_ids=args.rules, enable_llm=not args.no_llm_check, force_recheck=args.force_recheck, llm_review=args.review, cache_dir=str(cache_dir), max_workers=args.check_workers, rollback_rule_ids=args.rollback_rules)
@@ -130,9 +132,10 @@ def _write_report(case: MatchedCase, input_path: Path, args: argparse.Namespace)
     counts = report.to_dict()["summary"]
     print(f"总体结论: {report.overall} | 通过 {counts['pass']} | 预警 {counts['warning']} | 违规 {counts['violation']} | 执行失败 {counts['error']} | 流程错误 {counts['pipeline_error']}")
     print(f"报告已写入: {output / 'summary.json'}, {output / 'summary.md'}")
+    return report
 
 
-def _process_document(report_path: str | Path, args: argparse.Namespace, reports_root: str | Path) -> Path:
+def _process_document(report_path: str | Path, args: argparse.Namespace, reports_root: str | Path) -> tuple[Path, MatchedCase, ApprovalReport | None]:
     """为一个输入文档分配 report_x，复制原文件并运行所选流程。"""
     source_document = Path(report_path).expanduser().resolve()
     if not source_document.is_file():
@@ -148,13 +151,35 @@ def _process_document(report_path: str | Path, args: argparse.Namespace, reports
     artifacts_dir = report_dir / "preprocessing"
     print(f"创建案件目录: {report_dir}，输入文件: {source_document}")
 
-    case = prepare_case(case_id=report_dir.name, report_path=staged_document, rules_path=args.policy_rules, output_path=matched_path, artifacts_dir=artifacts_dir, document_page_1_pdf_page=args.document_page_1_pdf_page, max_section_pages=args.max_section_pages, candidate_count=args.candidate_count, evidence_count=args.evidence_count, minimum_score=args.minimum_score, use_llm=args.use_llm, strict_llm=args.strict_llm, match_workers=args.match_workers)
+    case = prepare_case(case_id=report_dir.name, report_path=staged_document, rules_path=args.policy_rules, output_path=matched_path, artifacts_dir=artifacts_dir, document_page_1_pdf_page=args.document_page_1_pdf_page, max_section_pages=args.max_section_pages, candidate_count=args.candidate_count, evidence_count=args.evidence_count, minimum_score=args.minimum_score, use_embedding=not args.no_embedding, use_llm=args.use_llm, strict_llm=args.strict_llm, match_workers=args.match_workers)
     evidence_count = sum(len(rule.evidence) for rule in case.rules)
     rules_with_evidence = sum(bool(rule.evidence) for rule in case.rules)
     print(f"步骤一、二完成: {matched_path} | 规则 {len(case.rules)} 匹配到原文 {rules_with_evidence} 证据段 {evidence_count}")
-    if not args.preprocess_only:
-        _write_report(case, matched_path, args)
-    return report_dir
+    approval_report = None if args.preprocess_only else _write_report(case, matched_path, args)
+    return report_dir, case, approval_report
+
+
+def _reports_root(path: str | Path) -> Path:
+    root = Path(path).expanduser().resolve()
+    if root.name != "reports":
+        raise ValueError(f"运行输出目录必须命名为 reports，实际为: {root}")
+    return root
+
+
+def _reset_reports(path: str | Path) -> Path:
+    """新建完整任务前清空上一次自动生成的 reports；--input 续跑不调用。"""
+    root = _reports_root(path)
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True)
+    return root
+
+
+def _write_brief(root: Path, reports: list[ApprovalReport], failures: list[tuple[str, str]] | None = None) -> Path:
+    path = root / _BRIEF_NAME
+    path.write_text(to_brief_markdown(reports, failures or []) + "\n", encoding="utf-8")
+    print(f"本次运行简报已写入: {path}")
+    return path
 
 
 def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -186,28 +211,53 @@ def main(argv: list[str] | None = None, *, reports_root: str | Path = "reports")
 
     if args.input:
         input_path = Path(args.input)
-        _write_report(_load_case(input_path, args.policy_rules), input_path, args)
+        report = _write_report(_load_case(input_path, args.policy_rules), input_path, args)
+        root = _reports_root(reports_root)
+        root.mkdir(parents=True, exist_ok=True)
+        _write_brief(root, [report])
         return
     if args.one_report_path:
-        _process_document(args.one_report_path, args, reports_root)
+        source = Path(args.one_report_path).expanduser().resolve()
+        root = _reports_root(reports_root)
+        if source == root or root in source.parents:
+            parser.error("--one_report_path 不能位于将被覆盖的 reports 输出目录中")
+        if not source.is_file():
+            parser.error(f"待解析文档不存在: {source}")
+        if not is_supported_document(source):
+            supported = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
+            parser.error(f"不支持的文档格式 {source.suffix or '<无扩展名>'}；当前支持: {supported}")
+        root = _reset_reports(root)
+        _report_dir, _case, report = _process_document(source, args, root)
+        if report is not None:
+            _write_brief(root, [report])
         return
 
-    documents = _discover_documents(args.reports_path, reports_root)
+    source_root = Path(args.reports_path).expanduser().resolve()
+    root = _reports_root(reports_root)
+    if source_root == root or root in source_root.parents:
+        parser.error("--reports_path 不能是 reports 输出目录或其子目录")
+    documents = _discover_documents(source_root, root)
     if not documents:
         supported = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
         parser.error(f"--reports_path 下没有可处理文档；当前支持: {supported}")
-    failures = []
+    root = _reset_reports(root)
+    failures: list[tuple[Path, Exception]] = []
+    completed_reports: list[ApprovalReport] = []
     for index, document_path in enumerate(documents, start=1):
         print(f"\n[{index}/{len(documents)}] 开始处理: {document_path}")
         try:
-            report_dir = _process_document(document_path, args, reports_root)
+            report_dir, _case, report = _process_document(document_path, args, root)
         except Exception as exc:
             failures.append((document_path, exc))
             print(f"[{index}/{len(documents)}] 处理失败: {document_path}: {exc}", file=sys.stderr)
             if not args.continue_on_error:
                 raise
         else:
+            if report is not None:
+                completed_reports.append(report)
             print(f"[{index}/{len(documents)}] 处理完成: {report_dir}")
+    if not args.preprocess_only:
+        _write_brief(root, completed_reports, [(str(path), f"{type(exc).__name__}: {exc}") for path, exc in failures])
     if failures:
         details = "\n".join(f"- {path}: {exc}" for path, exc in failures)
         raise SystemExit(f"批量处理存在 {len(failures)} 个失败文件:\n{details}")

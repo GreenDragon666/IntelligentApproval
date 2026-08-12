@@ -42,7 +42,7 @@ class MatchingConcurrencyTest(unittest.TestCase):
             rules_path = root / "rules.json"
             rules_path.write_text(json.dumps([{"rule_id": index, "rule_raw": "项目内容", "rule_text": "检查项目内容", "check_method": "大模型分析"} for index in range(1, 5)], ensure_ascii=False), encoding="utf-8")
             with patch("src.cont_match.pipeline.select_candidates", side_effect=select):
-                case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", use_llm=True, strict_llm=True, match_workers=4, candidate_count=1, evidence_count=1, minimum_score=0)
+                case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", use_embedding=False, use_llm=True, strict_llm=True, match_workers=4, candidate_count=1, evidence_count=1, minimum_score=0)
         self.assertGreater(peak, 1)
         self.assertTrue(all(rule.check_method == "大模型分析" for rule in case.rules))
 
@@ -54,8 +54,23 @@ class MatchingConcurrencyTest(unittest.TestCase):
             rules_path = root / "rules.json"
             rules_path.write_text(json.dumps([{"rule_id": 1, "rule_raw": "评分标准是否明确", "rule_text": "生成内容", "check_method": "大模型分析"}], ensure_ascii=False), encoding="utf-8")
             with patch("src.cont_match.pipeline.select_candidates", return_value=[]):
-                case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", use_llm=True, strict_llm=True, candidate_count=1, evidence_count=1, minimum_score=0)
+                case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", use_embedding=False, use_llm=True, strict_llm=True, candidate_count=1, evidence_count=1, minimum_score=0)
         self.assertEqual(len(case.rules[0].evidence), 1)
+
+    @patch("src.cont_match.pipeline.HybridSectionMatcher", side_effect=RuntimeError("模型目录不存在"))
+    def test_embedding_failure_is_visible_and_falls_back_to_lexical(self, _hybrid) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = root / "report.txt"
+            report.write_text("第一章 评标办法\n评分标准应当明确具体。", encoding="utf-8")
+            rules_path = root / "rules.json"
+            rules_path.write_text(json.dumps([{"rule_id": 1, "rule_raw": "评分标准是否明确", "rule_text": "生成内容"}], ensure_ascii=False), encoding="utf-8")
+            artifacts = root / "artifacts"
+            case = prepare_case(case_id="report_1", report_path=report, rules_path=rules_path, output_path=root / "matched.json", artifacts_dir=artifacts, use_embedding=True, candidate_count=1, evidence_count=1, minimum_score=0)
+            manifest = json.loads((artifacts / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(case.rules[0].evidence), 1)
+        self.assertEqual(manifest["retrieval_method"], "lexical")
+        self.assertIn("模型目录不存在", manifest["embedding_error"])
 
 
 if __name__ == "__main__":
