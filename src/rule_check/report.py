@@ -7,7 +7,7 @@ from collections.abc import Sequence
 
 from ..rule_schema import ApprovalReport, MatchedCase, Status
 
-_LABEL = {Status.VIOLATION: "❌ 违规", Status.WARNING: "⚠️ 预警", Status.PASS: "✅ 通过", Status.INSUFFICIENT_INPUT: "➖ 输入不足", Status.ERROR: "⛔ 执行失败"}
+_LABEL = {Status.VIOLATION: "❌ 违规", Status.WARNING: "⚠️ 预警", Status.PASS: "✅ 通过", Status.INSUFFICIENT_INPUT: "⛔ 输入不足", Status.ERROR: "⛔ 执行失败"}
 _OVERALL_LABEL = {"violation": "违规", "warning": "预警", "pass": "通过", "partial": "部分完成"}
 
 
