@@ -6,7 +6,8 @@ import os
 from dataclasses import dataclass
 
 # 本地权重根目录（路径含空格，脚本里务必加引号）
-_DEFAULT_MODEL_DIR = "/home/zyl/public/LLM Library/Qwen3-8B"
+_DEFAULT_LLM_MODEL_DIR = "/home/zyl/public/LLM Library/Qwen3-8B"
+_DEFAULT_EMBED_MODEL_DIR = "/home/zyl/public/LLM Library/bge-m3"
 
 
 @dataclass
@@ -16,7 +17,7 @@ class Settings:
     # vLLM 的 --served-model-name；客户端请求用这个名字
     llm_model: str = os.getenv("LOCAL_LLM_MODEL", "Qwen3-8B")
     # 本地权重目录（起服务时用）；客户端一般不直接读这个路径
-    llm_model_path: str = os.getenv("LOCAL_LLM_MODEL_PATH", _DEFAULT_MODEL_DIR)
+    llm_model_path: str = os.getenv("LOCAL_LLM_MODEL_PATH", _DEFAULT_LLM_MODEL_DIR)
     llm_api_key: str = os.getenv("LOCAL_LLM_API_KEY", "EMPTY")
     llm_candidate_chars: int = int(os.getenv("LOCAL_LLM_CANDIDATE_CHARS", "1200"))
     llm_timeout: float = float(os.getenv("LOCAL_LLM_TIMEOUT", "180"))
@@ -31,8 +32,8 @@ class Settings:
     semantic_max_chars_per_evidence: int = int(os.getenv("SEMANTIC_MAX_CHARS_PER_EVIDENCE", "8000"))
 
     # —— 步骤二 embedding 混合召回 ——
-    embed_model: str = os.getenv("LOCAL_EMBED_MODEL", "BAAI/bge-m3")
-    embed_device: str = os.getenv("LOCAL_EMBED_DEVICE", "")
+    embed_model: str = os.getenv("LOCAL_EMBED_MODEL", _DEFAULT_EMBED_MODEL_DIR)
+    embed_device: str = os.getenv("LOCAL_EMBED_DEVICE", "cpu")
     embed_batch_size: int = int(os.getenv("LOCAL_EMBED_BATCH_SIZE", "16"))
     embed_weight: float = float(os.getenv("LOCAL_EMBED_WEIGHT", "0.45"))
     embed_chunk_chars: int = int(os.getenv("LOCAL_EMBED_CHUNK_CHARS", "1400"))
