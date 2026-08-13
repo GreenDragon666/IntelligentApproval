@@ -1,0 +1,4 @@
+import { Braces, X } from 'lucide-react';
+import { useState } from 'react';
+import { contractSample } from '../data/contractSample';
+export function ContractModal() { const [open,setOpen]=useState(false); return <><button className="ghost-button" onClick={()=>setOpen(true)}><Braces size={17}/>JSON 接口契约</button>{open&&<div className="modal-backdrop" role="presentation" onMouseDown={()=>setOpen(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="contract-title" onMouseDown={e=>e.stopPropagation()}><header><div><span className="eyebrow">BACKEND HANDOFF</span><h2 id="contract-title">预留 JSON 格式与样例</h2></div><button className="icon-button" aria-label="关闭接口契约" onClick={()=>setOpen(false)}><X/></button></header><p className="muted">原始文件通过重复的 <code>documents</code> 字段上传。响应会在服务边界规范化，仅保留可公开展示的契约字段；完整样例仍位于 <code>/data/*.sample.json</code>。</p><pre>{contractSample}</pre></section></div>}</>; }

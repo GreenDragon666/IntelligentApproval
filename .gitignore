@@ -1,3 +1,6 @@
 __pycache__/
+
 reports/
-files/
+data/
+
+node_modules/
