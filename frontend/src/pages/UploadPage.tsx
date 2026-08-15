@@ -2,5 +2,52 @@ import { FileText, Play, Plus, ShieldCheck, Trash2, UploadCloud } from 'lucide-r
 import { ChangeEvent, DragEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { hasReviewBackend, reviewService } from '../services/reviewService';
-const MAX=30*1024*1024;
-export function UploadPage(){const [files,setFiles]=useState<File[]>([]);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const input=useRef<HTMLInputElement>(null);const nav=useNavigate();const add=(incoming:File[])=>{const invalid=incoming.find(file=>file.type!=='application/pdf'&&!file.name.toLowerCase().endsWith('.pdf'));const large=incoming.find(file=>file.size>MAX);if(invalid)return setError('仅支持 PDF 文件');if(large)return setError('单个文件不能超过 30 MB');setError('');setFiles(old=>[...old,...incoming.filter(file=>!old.some(existing=>existing.name===file.name&&existing.size===file.size))].slice(0,10));};const choose=(event:ChangeEvent<HTMLInputElement>)=>add(Array.from(event.target.files||[]));const drop=(event:DragEvent)=>{event.preventDefault();add(Array.from(event.dataTransfer.files));};const start=async()=>{setBusy(true);try{const job=await reviewService.createReview({files,mode:hasReviewBackend?'live':'sample'});nav(`/reviews/${encodeURIComponent(job.id)}/processing?mode=${job.mode}`);}catch{setError('暂时无法上传审批文件，请检查接口配置后重试');setBusy(false);}};return <div className="upload-page"><header className="workspace-header"><div><span className="eyebrow">文件审查工作台</span><h1>新建招标文件审查</h1><p>上传待审批 PDF，系统将按合规规则输出结论、法规依据与证据位置。</p></div><div className="workspace-meta"><ShieldCheck/><span><b>规则与语义联合审查</b><small>结果需由专业人员最终复核</small></span></div></header><section className="upload-card"><div className="section-heading"><div><h2>待审文件</h2><p>最多 10 份，单个文件不超过 30 MB</p></div><span className="step">步骤 1 / 1</span></div><div className="dropzone" tabIndex={0} role="button" aria-label="选择或拖放 PDF 文件" onClick={()=>input.current?.click()} onKeyDown={event=>{if(event.key==='Enter'||event.key===' ')input.current?.click();}} onDragOver={event=>event.preventDefault()} onDrop={drop}><input ref={input} hidden type="file" accept="application/pdf,.pdf" multiple onChange={choose}/><span className="upload-icon"><UploadCloud/></span><div><b>拖放 PDF 到此处，或点击选择文件</b><span>建议上传最终定稿前的原始审批文件</span></div></div>{error&&<div className="inline-error" role="alert">{error}</div>}<div className="file-workspace"><header><div><b>文件列表</b><span>{files.length} / 10</span></div>{files.length>0&&<button onClick={()=>setFiles([])}>清空列表</button>}</header>{files.length?<div className="file-list">{files.map((file,index)=><div className="file-item" key={`${file.name}-${file.size}`}><span className="file-type"><FileText/></span><span><b>{file.name}</b><small>PDF · {(file.size/1024/1024).toFixed(2)} MB · 等待上传</small></span><button aria-label={`移除 ${file.name}`} onClick={()=>setFiles(files.filter((_,position)=>position!==index))}><Trash2 size={17}/></button></div>)}</div>:<div className="file-empty">尚未添加文件。选择文件后可在此确认上传队列。</div>}</div><div className="demo-notice"><b>{hasReviewBackend?'审批接口已连接':'当前为演示模式'}</b><span>{hasReviewBackend?'文件将通过重复的 documents 表单字段提交至审批服务。':'未配置 VITE_REVIEW_API_URL；上传操作仅演示流程并展示内置报告，不会分析所选文件。'}</span></div><div className="upload-actions"><button className="secondary-button" onClick={()=>nav('/reviews/sample-review/processing?mode=sample')}><Play size={17}/>查看示例报告</button><button className="primary-button" disabled={!files.length||busy} onClick={start}><Plus size={18}/>{busy?'正在上传…':hasReviewBackend?'上传并开始审查':'演示上传流程'}</button></div></section></div>}
+
+const MAX = 30 * 1024 * 1024;
+const SUPPORTED = /\.(pdf|doc|docx|docm|odt|rtf|wps|txt|md)$/i;
+
+export function UploadPage() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+
+  const add = (incoming: File[]) => {
+    const invalid = incoming.find(file => !SUPPORTED.test(file.name));
+    const large = incoming.find(file => file.size > MAX);
+    if (invalid) return setError('支持 PDF、Word、ODT、RTF、WPS 和文本文件');
+    if (large) return setError('单个文件不能超过 30 MB');
+    setError('');
+    setFiles(old => [...old, ...incoming.filter(file => !old.some(existing => existing.name === file.name && existing.size === file.size))].slice(0, 10));
+  };
+  const choose = (event: ChangeEvent<HTMLInputElement>) => add(Array.from(event.target.files || []));
+  const drop = (event: DragEvent) => { event.preventDefault(); add(Array.from(event.dataTransfer.files)); };
+  const start = async () => {
+    setBusy(true);
+    try {
+      const job = await reviewService.createReview({ files, mode: hasReviewBackend ? 'live' : 'sample' });
+      navigate(`/reviews/${encodeURIComponent(job.id)}/processing?mode=${job.mode}`);
+    } catch {
+      setError('暂时无法上传审批文件，请检查接口配置后重试');
+      setBusy(false);
+    }
+  };
+
+  return <div className="upload-page">
+    <header className="workspace-header"><div><span className="eyebrow">文件审查工作台</span><h1>新建招标文件审查</h1><p>上传待审批文档，系统将按合规规则输出结论、法规依据与证据位置。</p></div><div className="workspace-meta"><ShieldCheck/><span><b>规则与语义联合审查</b><small>结果需由专业人员最终复核</small></span></div></header>
+    <section className="upload-card">
+      <div className="section-heading"><div><h2>待审文件</h2><p>最多 10 份，单个文件不超过 30 MB</p></div><span className="step">步骤 1 / 1</span></div>
+      <div className="dropzone" tabIndex={0} role="button" aria-label="选择或拖放待审文件" onClick={() => input.current?.click()} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') input.current?.click(); }} onDragOver={event => event.preventDefault()} onDrop={drop}>
+        <input ref={input} hidden type="file" accept=".pdf,.doc,.docx,.docm,.odt,.rtf,.wps,.txt,.md" multiple onChange={choose}/><span className="upload-icon"><UploadCloud/></span><div><b>拖放文件到此处，或点击选择文件</b><span>支持 PDF、Word、ODT、RTF、WPS 和文本文件</span></div>
+      </div>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      <div className="file-workspace">
+        <header><div><b>文件列表</b><span>{files.length} / 10</span></div>{files.length > 0 && <button onClick={() => setFiles([])}>清空列表</button>}</header>
+        {files.length ? <div className="file-list">{files.map((file, index) => <div className="file-item" key={`${file.name}-${file.size}`}><span className="file-type"><FileText/></span><span><b>{file.name}</b><small>{file.name.split('.').pop()?.toUpperCase()} · {(file.size / 1024 / 1024).toFixed(2)} MB · 等待上传</small></span><button aria-label={`移除 ${file.name}`} onClick={() => setFiles(files.filter((_, position) => position !== index))}><Trash2 size={17}/></button></div>)}</div> : <div className="file-empty">尚未添加文件。选择文件后可在此确认上传队列。</div>}
+      </div>
+      <div className="demo-notice"><b>{hasReviewBackend ? '审批接口已连接' : '当前为演示模式'}</b><span>{hasReviewBackend ? '文件将通过重复的 documents 表单字段提交至审批服务。' : '未配置 VITE_REVIEW_API_URL；上传操作仅演示流程并展示内置报告，不会分析所选文件。'}</span></div>
+      <div className="upload-actions"><button className="secondary-button" onClick={() => navigate('/reviews/sample-review/processing?mode=sample')}><Play size={17}/>查看示例报告</button><button className="primary-button" disabled={!files.length || busy} onClick={start}><Plus size={18}/>{busy ? '正在上传…' : hasReviewBackend ? '上传并开始审查' : '演示上传流程'}</button></div>
+    </section>
+  </div>;
+}

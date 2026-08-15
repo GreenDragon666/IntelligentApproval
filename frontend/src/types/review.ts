@@ -9,3 +9,5 @@ export interface ReviewSummary { schemaVersion: string; reviewId: string; mode: 
 export interface DocumentDetail { schemaVersion: string; reviewId: string; documentId: string; fileName: string; overallConclusion: RuleStatus; rules: RuleDetail[]; }
 export interface CreateReviewInput { files: File[]; mode: ReviewMode; }
 export interface ReviewJob { id: string; mode: ReviewMode; status: 'queued' | 'processing' | 'completed' | 'failed'; }
+export interface DocumentProgress { id: string; fileName: string; status: ReviewJob['status']; stage: string; progress: number; errorMessage?: string; }
+export interface ReviewProgress extends ReviewJob { internalStatus: string; stage: string; progress: number; totalDocuments: number; completedDocuments: number; failedDocuments: number; errorMessage?: string; documents: DocumentProgress[]; }

@@ -4,3 +4,11 @@ reports/
 data/
 
 node_modules/
+runtime/
+.env
+backend/.env
+*.log
+celerybeat-schedule*
+dist/
+*.tsbuildinfo
+.DS_Store

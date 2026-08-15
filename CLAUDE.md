@@ -1,115 +1,93 @@
 # CLAUDE.md
 
-## 项目目标
+## 项目目标与当前结构
 
-对招标文件执行完整的智能合规审批：
+本仓库是招标文件智能合规审批系统：
 
-1. `src/dir_extr/` 提取 PDF、Office、纯文本的分页文本、目录和章节；
-2. `src/cont_match/` 将政策规则匹配到招标原文并生成正式 JSON；
-3. `src/rule_check/` 根据规则表“检查方式”调用全局结构化执行器或本地 LLM 语义判定，输出审批报告。
+- `frontend/`：React + TypeScript + Vite 页面；
+- `backend/`：FastAPI + PostgreSQL + Redis/Celery 后端；
+- `algorithm/`：目录提取、内容匹配、规则校验三阶段核心算法；
+- `scripts/`：各服务启动入口；
+- `docs/ALGORITHM_ARCHITECTURE.md` 和 `docs/BACKEND_ARCHITECTURE.md`：详细设计与运维说明。
 
-`main.py` 是三步统一入口；`prepare_case.py` 保留为步骤一、二独立运行/排错入口；已有
-`rules_matched.json` 可以通过 `main.py --input` 单独进入步骤三。
+新任务通过前端上传到 `POST /api/reviews`。API 保存文件和 PostgreSQL 记录后只投递 UUID；Celery worker 通过 `backend/app/services/algorithm_adapter.py` 直接调用 `prepare_case()` 与 `run_case()`。禁止让 Web 任务调用 `algorithm/main.py`，因为 CLI 会管理并覆盖全局 `reports/`。
 
-文档输入不允许手工指定 `case_id`。`--one_report_path` 处理单个文档，`--reports_path` 递归
-处理目录下所有支持文档；每个文档自动分配新的 `reports/report_x/` 并复制原文件。
-新的 `--one_report_path`/`--reports_path` 运行必须先覆盖根目录 `reports/`，使其只表示最近一次任务，
-编号从 `report_1` 开始；`--input` 续跑不得清空正在读取的 reports。
+## 后端硬约束
 
-## 硬约束
+- 数据库固定为 PostgreSQL；不要加入 SQLite/MySQL 兼容分支。
+- Redis 只作 Celery broker/backend；PostgreSQL 是任务状态和结果的唯一真相来源。
+- 原文件和算法产物保存在 `STORAGE_ROOT`；数据库保存相对路径和 JSONB。
+- API 请求线程不得运行算法；所有核心处理必须进入 Celery。
+- 前端不得直接消费算法原始 JSON。所有映射集中在 `backend/app/services/result_mapper.py`。
+- 数据库结构变化必须新增 Alembic migration，不使用运行时 `create_all()`。
+- API 与 worker 可以多实例；Celery beat 在集群中只能有一个实例。
+- 每个任务创建时快照政策规则表并保存 SHA-256；worker 运行前必须校验快照哈希。
+- 每份文档必须使用独立 `work/decision_cache`，不得共享案件缓存。
+- 上传文件路径必须经过 `safe_filename()` 和 `ensure_within()`。
+- 不在 API 中返回模型原始响应、缓存键、堆栈或服务器绝对路径。
 
-- 不调用外部模型 API；所有模型调用统一连接服务器本地 Qwen3-8B vLLM。
-- 不自动启动模型服务，由用户手动运行 `scripts/serve_vllm_qwen3_8b.sh`。
-- 不保留 CSV 转换逻辑；正式输入/中间接口使用约定 JSON。
-- 步骤一、二不得写死义齿、医疗器械、RPS 或特定产品领域词汇。
-- 同伴原始参考代码位于 `references/stage1+2/`，不导入生产调用链，也不随意修改。
-- 不在运行时生成案件专用 Python checker；确定性逻辑必须位于全局执行器。
-- `rule_raw` 决定审查主题；`rule_text` 的 `【法规依据】` 可作为具体法律要求参考，`【描述】`只可帮助 LLM 理解适用场景、不得单独新增判定条件，`【公式】`、开发说明和其他生成块不得参与召回或判定。
-- “检查方式”包含“结构化数据检查”时必须走确定性执行器；其他方法走语义判定。
-- 结构化阈值和比较方向必须从 `rule_raw + 法规依据` 派生并复核，不得读取生成公式。
-- 结构化字段别名可由本地 LLM 映射，但金额、比例、日期等值必须由正则提取；生成字段未匹配不得直接返回 `insufficient_input`。
-- 结构化计算成功时 LLM 只解释、不覆盖状态；`requires_review` 时允许语义兜底形成最终结果，但必须保留结构化初判和计算痕迹。
-- 所有本地 Qwen JSON 输出必须兼容空 `<think></think>`、Markdown 和前后说明文字；分析生成失败单独记录，不得计为核心流程错误。
-- 步骤二默认使用字符 TF-IDF 与本地 BGE-M3 混合召回，embedding 只决定候选相关度、不决定步骤三状态；每条规则最终 evidence 不得超过3条。
-- `argparse` 的 `add_argument` 调用保持一行，不主动拆成多行排版。
-- Office 文档优先通过 LibreOffice 临时转 PDF；不得覆盖或改写用户原文件。
-- DOCX 无 LibreOffice 时允许 XML 文本降级，DOC/ODT/RTF/WPS 无转换器时必须明确报错。
-- 每次完整规则校验在 `reports/summary_brief.md` 只生成一份运行级简报；每个案件保留详细 `results/summary.md`。所有状态写 LLM 分析和证据位置/双页码，通过规则不复制完整 evidence 原文。
+## 算法硬约束
 
-## 模块归属
+- 不调用外部模型 API；所有模型调用连接服务器本地 Qwen3-8B vLLM。
+- 不自动启动模型服务，由运维单独运行 `scripts/algorithm/serve_vllm_qwen3_8b.sh`。
+- 步骤一、二不得写死义齿、医疗器械或特定产品领域词汇。
+- 不在运行时生成案件专用 Python checker；确定性逻辑位于全局执行器。
+- `rule_raw` 决定审查主题；`rule_text` 中的法规依据可参考，生成公式/开发说明不得直接参与判定。
+- 检查方式包含“结构化数据检查”时走确定性执行器；其他方法走语义判定。
+- 结构化数值必须由正则提取；LLM 只做字段语义映射、兜底判断和解释。
+- 结构化计算成功时 LLM 不覆盖状态；`requires_review` 时可语义兜底，但保留结构化初判。
+- Qwen JSON 解析必须兼容 `<think>`、Markdown 代码围栏和前后说明文字。
+- 步骤二默认字符 TF-IDF + 本地 BGE-M3 混合召回，最终 evidence 不超过 3 条。
+- Office 优先使用 LibreOffice 转 PDF，不覆盖用户原文件；DOCX 可 XML 降级。
+- `argparse.add_argument` 保持一行，不主动拆行。
 
-- `src/llm.py`：步骤二、三共享的本地模型客户端。
-- `src/page_schema.py`：步骤一、二共享的内部数据类型。
-- `src/rule_schema.py`：步骤二输出、步骤三输入的正式契约。
-- `src/cont_match/pipeline.py`：步骤一、二的串联编排及正式匹配 JSON 输出。
-- `src/engine.py`：案件级审批编排，由统一入口调用。
-- `src/rule_check/`：步骤三检查方式路由、全局确定性执行器、语义判定、缓存、复核和报告。
-- `scripts/run_batch.py`：接收输入目录并调用统一入口的批量模式。
+## 数据契约
 
-## 输入契约
+算法正式匹配契约位于 `algorithm/src/rule_schema.py`：
 
-见 `docs/MATCHED_JSON.md` 和 `src/rule_schema.py`：
-
-- `source` 只允许 `file`；
-- `rule_id` 是整数序号；
+- `source` 只包含 `file`；
+- `rule_id` 为整数；
 - `rule_raw` 对应“重点排查情形”；
 - `rule_text` 对应“触发逻辑公式”；
 - `check_method` 对应“检查方式”；
 - `structured_fields` 对应“结构化数据展示字段”；
-- `evidence` 包含原文及 PDF/文件内两套页码。
+- `evidence` 包含原文、章节和 PDF/文件内双页码。
 
-## 本地模型
-
-- 生成模型：Qwen3-8B；embedding 模型：本地 BGE-M3；
-- 服务脚本：`scripts/serve_vllm_qwen3_8b.sh`；
-- 默认接口：`http://localhost:8001/v1`；
-- served model name：`Qwen3-8B`；
-- 服务端变量使用 `LLM_*`，Python 客户端变量使用 `LOCAL_LLM_*`；
-- 不要在自动测试中启动模型。
-- 步骤二、三默认各并发4个请求；语义判定与结果解释使用 `/no_think` 和短 JSON 输出。
+前端公开契约位于 `backend/app/schemas.py` 和 `frontend/src/types/review.ts`。算法状态映射仅在 `result_mapper.py`：`pass -> passed`、`insufficient_input/error -> insufficient`，其中 `error` 额外累计 `executionFailed`。
 
 ## 常用命令
 
 ```bash
-# 完整三步流程（需先手动启动 vLLM）
-python main.py \
-  --one_report_path /incoming/招标文件2.pdf \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
-  --use-llm \
-  --strict-llm
+# 开发基础设施
+bash scripts/backend/run_infrastructure.sh
 
-# 只运行步骤一、二
-python main.py \
-  --one_report_path /incoming/招标文件2.pdf \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --document-page-1-pdf-page 9 \
-  --use-llm \
-  --preprocess-only
+# vLLM
+bash scripts/algorithm/serve_vllm_qwen3_8b.sh
 
-# 从已有 JSON 单独运行步骤三，并从当前规则表刷新检查方式
-python main.py --input reports/report_2/matched/rules_matched.json --policy-rules /path/to/policy_rules.xlsx
+# 后端单进程入口
+bash scripts/backend/migrate.sh
+bash scripts/backend/run_api.sh
+bash scripts/backend/run_worker.sh
+bash scripts/backend/run_beat.sh
 
-# 步骤三只执行结构化规则，禁用语义 LLM
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --no-llm-check
+# 单服务器联合入口
+bash scripts/backend/run_backend.sh
 
-# 单条规则重检并保留旧结果历史
-python main.py \
-  --input reports/report_2/matched/rules_matched.json \
-  --rules 2 \
-  --force-recheck
+# 前端
+bash scripts/frontend/run.sh
 
-# 多案件批量完整运行
-python scripts/run_batch.py \
-  --reports_path /incoming/tenders \
-  --policy-rules /path/to/policy_rules.xlsx \
-  --use-llm \
-  --strict-llm
+# 后端纯逻辑测试
+PYTHONPATH=backend python -m unittest discover -s backend/tests -v
+python -m compileall -q backend
 
-# 测试
-python -m unittest discover -s tests -v
+# 算法测试（需要算法依赖）
+PYTHONPATH=algorithm python -m unittest discover -s algorithm/tests -v
+
+# 前端生产构建
+cd frontend && npm run build
+
+# 算法 CLI 单文件流程
+python algorithm/main.py --one_report_path data/reports/招标文件1.pdf --policy-rules data/招标文件预警规则梳理_V1.0_yy_20260610.xlsx --use-llm --strict-llm
 ```
 
-完整部署、参数、缓存和回滚边界见 `README.md`，架构见 `docs/ARCHITECTURE.md`。
+后端启动、API、状态机、目录协议、故障恢复和生产注意事项以 `docs/BACKEND_ARCHITECTURE.md` 为准。

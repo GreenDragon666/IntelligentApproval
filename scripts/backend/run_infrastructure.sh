@@ -3,6 +3,6 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$PROJECT_ROOT/frontend"
-npm install
-exec npm run dev -- --host 0.0.0.0
+cd "$PROJECT_ROOT"
+exec docker compose -f backend/docker-compose.infrastructure.yml up -d
+
