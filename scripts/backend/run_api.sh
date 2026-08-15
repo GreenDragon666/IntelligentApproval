@@ -3,11 +3,9 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PROJECT_ROOT/scripts/lib/load_runtime_config.sh"
+require_backend_runtime_vars
 export PYTHONPATH="$PROJECT_ROOT/backend${PYTHONPATH:+:$PYTHONPATH}"
-HOST="${BACKEND_HOST:-0.0.0.0}"
-PORT="${BACKEND_PORT:-8000}"
-WORKERS="${BACKEND_API_WORKERS:-2}"
 
 cd "$PROJECT_ROOT"
-exec uvicorn app.main:app --host "$HOST" --port "$PORT" --workers "$WORKERS" --proxy-headers
-
+exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" --workers "$BACKEND_API_WORKERS" --proxy-headers

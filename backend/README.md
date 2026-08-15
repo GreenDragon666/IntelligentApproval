@@ -18,7 +18,7 @@ bash scripts/backend/run_beat.sh     # 唯一的 Celery beat 调度器
 
 单服务器开发可用 `bash scripts/backend/run_backend.sh` 一次启动以上进程。生产环境应由 systemd、Supervisor 或 Kubernetes 分别监管三个入口，并确保集群中只运行一个 beat 实例。
 
-配置模板为 `backend/.env.example`。完整说明见 `docs/BACKEND_ARCHITECTURE.md`。
+唯一配置模板为 `config/runtime.env.example`。首次运行 `bash scripts/setup_runtime_config.sh` 创建本机配置，所有入口脚本会自动加载，不需要在终端执行 `export`。完整说明见 `docs/BACKEND_ARCHITECTURE.md`。
 
 ## 无外部服务的快速测试
 
@@ -28,4 +28,3 @@ python -m compileall -q backend
 ```
 
 这些测试不连接 PostgreSQL、Redis 或 vLLM。完整联调必须在服务器启动依赖后进行。
-

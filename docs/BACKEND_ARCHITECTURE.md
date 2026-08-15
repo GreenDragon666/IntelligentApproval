@@ -43,15 +43,20 @@ backend/
 │   ├── tasks/
 │   │   ├── celery_app.py        # Celery 连接与周期任务
 │   │   └── review_tasks.py      # 文档编排、恢复和结果入库
-│   ├── config.py                # 环境配置
+│   ├── config.py                # 从全局 runtime.env 读取并校验配置
 │   ├── database.py              # SQLAlchemy engine/session
 │   ├── models.py                # PostgreSQL 模型
 │   ├── schemas.py               # 对外 API 契约
 │   └── main.py                  # ASGI 入口 app.main:app
 ├── migrations/                  # Alembic 迁移
 ├── tests/                       # 不依赖外部服务的契约测试
-├── .env.example
 └── requirements.txt
+
+config/
+└── runtime.env.example          # 全项目唯一运行配置模板
+
+scripts/lib/
+└── load_runtime_config.sh       # 所有 shell 入口共用的配置加载器
 ```
 
 算法仍归 `algorithm/` 所有。后端不得复制算法实现，也不得调用会清空根目录 `reports/` 的 `algorithm/main.py`。`AlgorithmAdapter` 直接调用：
@@ -247,7 +252,8 @@ bash scripts/backend/run_infrastructure.sh
 ### 7.3 配置
 
 ```bash
-cp backend/.env.example backend/.env
+bash scripts/setup_runtime_config.sh
+# 然后只编辑 config/runtime.env
 ```
 
 生产环境必须逐项修改：
@@ -259,14 +265,19 @@ cp backend/.env.example backend/.env
 - `LOCAL_LLM_BASE_URL`、`LOCAL_LLM_MODEL`、`LOCAL_EMBED_MODEL`；
 - 算法并发与超时参数。
 
-路径含空格时 `.env` 中直接写完整值，不要附加 shell 引号字符。
+所有后端、Celery、算法、vLLM、基础设施和前端启动脚本都会自动加载这个文件，不需要在终端执行
+`export`。配置值采用受信任的 Bash 赋值语法；路径含空格时必须使用双引号。`config/runtime.env` 已被
+Git 忽略且初始化权限为 `600`，不要提交数据库密码等机密信息。
 
 ### 7.4 启动顺序
 
 ```bash
-# 1. PostgreSQL、Redis 已就绪
-# 2. vLLM 已就绪
+# 1. 启动开发 PostgreSQL/Redis，或确认企业实例已就绪
+bash scripts/backend/run_infrastructure.sh
+
+# 2. 启动并检查 vLLM
 bash scripts/algorithm/serve_vllm_qwen3_8b.sh
+bash scripts/algorithm/check_vllm.sh
 
 # 3. 数据库迁移
 bash scripts/backend/migrate.sh
@@ -283,16 +294,15 @@ bash scripts/backend/run_beat.sh
 bash scripts/backend/run_backend.sh
 ```
 
-前端：
+后端依赖检查：
 
 ```bash
-cp frontend/.env.example frontend/.env
-bash scripts/frontend/run.sh
+bash scripts/backend/check_services.sh
 ```
 
 ### 7.5 并发建议
 
-`CELERY_WORKER_CONCURRENCY` 默认 1。算法自身已经通过 `ALGORITHM_MATCH_WORKERS` 和 `ALGORITHM_CHECK_WORKERS` 并发调用 vLLM；盲目提高 Celery 进程数会让每个进程各自加载一份 embedding 模型并增加内存占用。先保持一个 Celery 进程，根据任务排队长度、CPU 内存和 vLLM 吞吐再增加独立 worker 实例。
+`CELERY_WORKER_CONCURRENCY` 默认 1。算法自身已经通过 `MATCHING_WORKERS` 和 `SEMANTIC_WORKERS` 并发调用 vLLM；盲目提高 Celery 进程数会让每个进程各自加载一份 embedding 模型并增加内存占用。先保持一个 Celery 进程，根据任务排队长度、CPU 内存和 vLLM 吞吐再增加独立 worker 实例。
 
 API 是无状态的，可用 `BACKEND_API_WORKERS` 增加进程数。API/worker 必须使用同一 PostgreSQL、Redis、配置和 `STORAGE_ROOT`。
 
@@ -300,7 +310,7 @@ API 是无状态的，可用 `BACKEND_API_WORKERS` 增加进程数。API/worker 
 
 ## 8. 本地无 vLLM 验证
 
-将下列配置写入 `backend/.env`：
+将下列配置写入 `config/runtime.env`：
 
 ```dotenv
 ALGORITHM_USE_EMBEDDING=false
@@ -344,7 +354,7 @@ PostgreSQL 是真相来源，这通常说明终态写文件时共享存储短暂
 
 ### vLLM 不在 Celery 使用的 GPU 上
 
-GPU 归 vLLM 进程管理。后端只访问 `LOCAL_LLM_BASE_URL`，不直接选择 vLLM GPU。通过启动 vLLM 前的 `CUDA_VISIBLE_DEVICES` 选择 GPU；API 和 Celery 无需再次指定同一 GPU。
+GPU 归 vLLM 进程管理。后端只访问 `LOCAL_LLM_BASE_URL`，不直接选择 vLLM GPU。修改统一配置中的 `LLM_CUDA_VISIBLE_DEVICES` 后重启 vLLM 即可；API 和 Celery 无需再次指定同一 GPU。
 
 ## 10. 安全与运维边界
 

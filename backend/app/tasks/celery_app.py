@@ -16,18 +16,18 @@ celery_app.conf.update(
     task_ignore_result=True,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
-    worker_prefetch_multiplier=1,
+    worker_prefetch_multiplier=settings.celery_worker_prefetch_multiplier,
     broker_connection_retry_on_startup=True,
     timezone="Asia/Shanghai",
     enable_utc=True,
     beat_schedule={
         "recover-undispatched-reviews": {
             "task": "approval.requeue_queued_reviews",
-            "schedule": 60.0,
+            "schedule": float(settings.celery_requeue_interval_seconds),
         },
         "recover-stale-reviews": {
             "task": "approval.recover_stale_reviews",
-            "schedule": 300.0,
+            "schedule": float(settings.celery_stale_recovery_interval_seconds),
         },
     },
 )

@@ -5,6 +5,9 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PROJECT_ROOT/scripts/lib/load_runtime_config.sh"
+require_backend_runtime_vars
+require_algorithm_runtime_vars
 PIDS=()
 
 cleanup() {
@@ -21,4 +24,3 @@ trap cleanup EXIT INT TERM
 "$PROJECT_ROOT/scripts/backend/run_beat.sh" & PIDS+=("$!")
 
 wait -n "${PIDS[@]}"
-

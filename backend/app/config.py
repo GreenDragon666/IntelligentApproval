@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+os.environ.setdefault("APP_PROJECT_ROOT", str(_REPOSITORY_ROOT))
+_RUNTIME_CONFIG = Path(os.getenv("APP_CONFIG_FILE", _REPOSITORY_ROOT / "config/runtime.env")).expanduser().resolve()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(str(_REPOSITORY_ROOT / ".env"), str(_REPOSITORY_ROOT / "backend/.env")),
+        env_file=str(_RUNTIME_CONFIG),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     app_name: str = "IntelligentApproval API"
@@ -35,6 +39,9 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 30 * 1024 * 1024
     max_documents_per_review: int = 10
     upload_chunk_bytes: int = 1024 * 1024
+    celery_worker_prefetch_multiplier: int = 1
+    celery_requeue_interval_seconds: int = 60
+    celery_stale_recovery_interval_seconds: int = 300
 
     algorithm_use_embedding: bool = True
     algorithm_use_llm_matching: bool = True
@@ -45,8 +52,8 @@ class Settings(BaseSettings):
     algorithm_candidate_count: int = 8
     algorithm_evidence_count: int = 3
     algorithm_minimum_score: float = 0.03
-    algorithm_match_workers: int | None = None
-    algorithm_check_workers: int | None = None
+    algorithm_match_workers: int = Field(default=4, validation_alias="MATCHING_WORKERS")
+    algorithm_check_workers: int = Field(default=4, validation_alias="SEMANTIC_WORKERS")
     task_stale_after_minutes: int = 360
 
     @field_validator("database_url")
@@ -84,8 +91,12 @@ class Settings(BaseSettings):
             raise ValueError("ALGORITHM_MAX_SECTION_PAGES 必须大于 0")
         if self.task_stale_after_minutes < 30:
             raise ValueError("TASK_STALE_AFTER_MINUTES 不得小于 30")
-        for name, value in (("ALGORITHM_MATCH_WORKERS", self.algorithm_match_workers), ("ALGORITHM_CHECK_WORKERS", self.algorithm_check_workers)):
-            if value is not None and value < 1:
+        if self.celery_worker_prefetch_multiplier < 1:
+            raise ValueError("CELERY_WORKER_PREFETCH_MULTIPLIER 必须大于 0")
+        if self.celery_requeue_interval_seconds < 1 or self.celery_stale_recovery_interval_seconds < 1:
+            raise ValueError("Celery 恢复调度间隔必须大于 0")
+        for name, value in (("MATCHING_WORKERS", self.algorithm_match_workers), ("SEMANTIC_WORKERS", self.algorithm_check_workers)):
+            if value < 1:
                 raise ValueError(f"{name} 必须大于 0")
         return self
 

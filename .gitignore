@@ -6,7 +6,7 @@ data/
 node_modules/
 runtime/
 .env
-backend/.env
+config/runtime.env
 *.log
 celerybeat-schedule*
 dist/

@@ -7,6 +7,7 @@
 - `frontend/`：React + TypeScript + Vite 页面；
 - `backend/`：FastAPI + PostgreSQL + Redis/Celery 后端；
 - `algorithm/`：目录提取、内容匹配、规则校验三阶段核心算法；
+- `config/runtime.env`：数据库、Redis、后端、算法、模型和前端地址的唯一运行配置；
 - `scripts/`：各服务启动入口；
 - `docs/ALGORITHM_ARCHITECTURE.md` 和 `docs/BACKEND_ARCHITECTURE.md`：详细设计与运维说明。
 
@@ -14,6 +15,7 @@
 
 ## 后端硬约束
 
+- 不新增零散 `.env`、INI 或脚本内运行默认值；新增运行参数统一进入 `config/runtime.env.example`，所有 shell 入口先加载 `scripts/lib/load_runtime_config.sh`。
 - 数据库固定为 PostgreSQL；不要加入 SQLite/MySQL 兼容分支。
 - Redis 只作 Celery broker/backend；PostgreSQL 是任务状态和结果的唯一真相来源。
 - 原文件和算法产物保存在 `STORAGE_ROOT`；数据库保存相对路径和 JSONB。
@@ -58,6 +60,9 @@
 ## 常用命令
 
 ```bash
+# 首次配置；日常启动不需要再执行 export
+bash scripts/setup_runtime_config.sh
+
 # 开发基础设施
 bash scripts/backend/run_infrastructure.sh
 
@@ -86,8 +91,8 @@ PYTHONPATH=algorithm python -m unittest discover -s algorithm/tests -v
 # 前端生产构建
 cd frontend && npm run build
 
-# 算法 CLI 单文件流程
-python algorithm/main.py --one_report_path data/reports/招标文件1.pdf --policy-rules data/招标文件预警规则梳理_V1.0_yy_20260610.xlsx --use-llm --strict-llm
+# 算法 CLI 单文件流程（脚本会加载统一配置）
+bash scripts/algorithm/run_one_report.sh
 ```
 
 后端启动、API、状态机、目录协议、故障恢复和生产注意事项以 `docs/BACKEND_ARCHITECTURE.md` 为准。

@@ -113,37 +113,35 @@ scripts/run_batch.py         # 批量入口
 
 ## 3. 启动 vLLM
 
-单张物理 GPU 3：
+全项目只读取 `config/runtime.env`。首次部署运行 `bash scripts/setup_runtime_config.sh`，然后在该文件中配置：
 
-```bash
-export LLM_CUDA_VISIBLE_DEVICES=3
-export LLM_MODEL_PATH="/home/zyl/LLM Library/Qwen3-8B"
-export LLM_MODEL=Qwen3-8B
-export LLM_HOST=127.0.0.1
-export LLM_PORT=8001
-export LLM_MAX_MODEL_LEN=16384
-export LLM_GPU_MEM_UTIL=0.9
-export LLM_MAX_NUM_SEQS=16
-
-bash scripts/serve_vllm_qwen3_8b.sh --tensor-parallel-size 1
+```dotenv
+LLM_CUDA_VISIBLE_DEVICES=3
+LLM_MODEL_PATH="/home/zyl/LLM Library/Qwen3-8B"
+LLM_MODEL=Qwen3-8B
+LLM_HOST=127.0.0.1
+LLM_PORT=8001
+LLM_MAX_MODEL_LEN=16384
+LLM_GPU_MEM_UTIL=0.9
+LLM_MAX_NUM_SEQS=16
+LOCAL_LLM_BASE_URL="http://${LLM_HOST}:${LLM_PORT}/v1"
+LOCAL_LLM_MODEL="${LLM_MODEL}"
+LOCAL_EMBED_MODEL="/home/zyl/LLM Library/bge-m3"
+LOCAL_EMBED_DEVICE=cpu
 ```
 
-业务终端：
+启动和检查不需要执行任何 `export`：
 
 ```bash
-export LOCAL_LLM_BASE_URL=http://127.0.0.1:8001/v1
-export LOCAL_LLM_MODEL=Qwen3-8B
-export LOCAL_LLM_API_KEY=EMPTY
-export LOCAL_EMBED_MODEL="/home/zyl/LLM Library/bge-m3"
-export LOCAL_EMBED_DEVICE=cpu
-
-python -c "from src.llm import healthcheck; print(healthcheck())"
+bash scripts/algorithm/serve_vllm_qwen3_8b.sh --tensor-parallel-size 1
+bash scripts/algorithm/check_vllm.sh
 ```
 
 步骤二默认加载本地 BGE-M3，服务器环境需安装 `sentence-transformers`，并把 `LOCAL_EMBED_MODEL`
-指向本地权重目录。`LOCAL_EMBED_DEVICE` 可设为 `cpu` 或 `cuda:0`；若想让 embedding 使用物理 GPU 2，
-可在业务终端用 `CUDA_VISIBLE_DEVICES=2 LOCAL_EMBED_DEVICE=cuda:0 python main.py ...`。vLLM 仍在自己的
-服务进程中使用物理 GPU 3，两者互不改变。embedding 初始化失败时默认打印原因并降级为纯字符召回；
+指向本地权重目录。`LOCAL_EMBED_DEVICE` 可设为 `cpu` 或 `cuda:0`。当前后端 worker 默认不设置
+`CUDA_VISIBLE_DEVICES`，因此 `cuda:0` 表示 worker 可见的第一张 GPU；生产环境若要把 embedding 固定到
+另一张卡，应在进程管理器中限制 worker 的 GPU，而 vLLM 的物理 GPU 始终由 `LLM_CUDA_VISIBLE_DEVICES`
+配置并由 vLLM 启动脚本设置。embedding 初始化失败时默认打印原因并降级为纯字符召回；
 设置 `LOCAL_EMBED_STRICT=1` 可改为立即终止，`--no-embedding` 可显式关闭。
 
 `src/llm.py` 使用复用连接池并设置 `trust_env=False`，连接本机 vLLM 时不会误用服务器上的
@@ -155,11 +153,7 @@ SOCKS/HTTP 代理。
 案件编号也从 `report_1` 重新开始；如需保留上一轮结果，请在启动新任务前自行复制整个目录。
 
 ```bash
-python main.py \
-  --one_report_path files/docs/招标文件2.pdf \
-  --policy-rules files/规则.xlsx \
-  --use-llm \
-  --strict-llm
+bash scripts/algorithm/run_one_report.sh
 ```
 
 `--use-llm` 仍只控制步骤二的候选重排。步骤三默认使用本地 Qwen：非结构化规则由一次调用完成
@@ -169,32 +163,16 @@ python main.py \
 批量运行：
 
 ```bash
-python scripts/run_batch.py \
-  --reports_path files/docs \
-  --policy-rules files/规则.xlsx \
-  --use-llm \
-  --strict-llm \
-  --continue-on-error
+bash scripts/algorithm/run_reports.sh
 ```
 
 ## 5. 性能配置
 
-步骤二和步骤三都并发向 vLLM 发请求，使 vLLM 能进行连续批处理。默认并发数均为4：
+步骤二和步骤三都并发向 vLLM 发请求，使 vLLM 能进行连续批处理。统一在 `config/runtime.env` 调整：
 
-```bash
-export MATCHING_WORKERS=4
-export SEMANTIC_WORKERS=4
-```
-
-也可按本次任务覆盖：
-
-```bash
-python main.py \
-  --one_report_path files/docs/招标文件2.pdf \
-  --policy-rules files/规则.xlsx \
-  --use-llm \
-  --match-workers 6 \
-  --check-workers 6
+```dotenv
+MATCHING_WORKERS=4
+SEMANTIC_WORKERS=4
 ```
 
 建议从4开始。若 vLLM 日志长期显示 `Waiting` 很多或单请求延迟明显上升，再降低；如果仍始终只有
