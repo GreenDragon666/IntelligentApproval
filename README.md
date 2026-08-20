@@ -28,7 +28,10 @@ bash scripts/check_runtime_config.sh
 #    脚本按依赖顺序逐个等待就绪，打印各服务地址后退出并把终端还给你。
 bash scripts/open_service.sh
 
-# 4. 同一个终端即可启动前端（同样自动读取 config/runtime.env）
+# 4. (可选)如果服务器不支持UI界面，在带UI界面的本机使用反向代理
+ssh -N -L 5173:127.0.0.1:5173 user@server
+
+# 5. 同一个终端即可启动前端（同样自动读取 config/runtime.env）
 bash scripts/frontend/run.sh
 ```
 
