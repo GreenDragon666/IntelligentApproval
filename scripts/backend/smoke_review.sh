@@ -24,7 +24,7 @@ while (( SECONDS < DEADLINE )); do
   STATUS_RESPONSE="$(curl --fail --silent --show-error --max-time 20 "$API_BASE/reviews/$REVIEW_ID/status")"
   STATUS="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["status"])' "$STATUS_RESPONSE")"
   PROGRESS="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["progress"])' "$STATUS_RESPONSE")"
-  echo "  状态: $STATUS，进度: $PROGRESS%"
+  echo "精确时间: $(date) 状态: $STATUS，进度: $PROGRESS%"
   if [[ "$STATUS" == "completed" || "$STATUS" == "failed" ]]; then
     echo "任务汇总："
     curl --fail --silent --show-error --max-time 30 "$API_BASE/reviews/$REVIEW_ID"

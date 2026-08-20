@@ -24,20 +24,23 @@ bash scripts/setup_runtime_config.sh
 # 编辑 config/runtime.env：确认数据库、Redis、规则文件、模型路径、GPU 和服务端口。
 bash scripts/check_runtime_config.sh
 
-# 3. 启动 PostgreSQL 和 Redis（仅开发环境提供的容器）
-bash scripts/backend/run_infrastructure.sh
+# 3. 一键在后台启动全部服务（PostgreSQL、Redis、vLLM、迁移、API、worker、beat）
+#    脚本按依赖顺序逐个等待就绪，打印各服务地址后退出并把终端还给你。
+bash scripts/open_service.sh
 
-# 4. 启动 vLLM（服务器环境）
-bash scripts/algorithm/serve_vllm_qwen3_8b.sh
-
-# 5. 迁移并启动 API、worker、beat
-bash scripts/backend/run_backend.sh
-
-# 6. 另一个终端启动前端（同样自动读取 config/runtime.env）
+# 4. 同一个终端即可启动前端（同样自动读取 config/runtime.env）
 bash scripts/frontend/run.sh
 ```
 
+`open_service.sh` 静默后台启动，日志集中在 `runtime/services/*.log`；停止全部服务用：
+
+```bash
+bash scripts/close_service.sh
+```
+
 API 默认位于 `http://127.0.0.1:8000`，OpenAPI 文档位于 `http://127.0.0.1:8000/docs`，前端默认位于 `http://127.0.0.1:5173`。
+
+如需分进程单独启动/交由 systemd 等监管，仍可使用 `scripts/algorithm/serve_vllm_qwen3_8b.sh`、`scripts/backend/run_api.sh`、`run_worker.sh`、`run_beat.sh` 等前台入口。
 
 本地没有 vLLM 时可以在 `config/runtime.env` 暂时设置：
 

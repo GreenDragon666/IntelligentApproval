@@ -39,52 +39,39 @@ python -m compileall -q backend algorithm
 
 这些测试验证代码契约，不代表 PostgreSQL、Redis、vLLM 或 GPU 已经可用。
 
-## 3. 启动 PostgreSQL 与 Redis
+## 3. 一键后台启动全部服务
 
-测试服务器使用仓库内的容器：
-
-```bash
-bash scripts/backend/run_infrastructure.sh
-docker compose -f backend/docker-compose.infrastructure.yml ps
-```
-
-如果使用企业已有实例，不运行第一条命令，只需在统一配置中写好连接地址。
-
-## 4. 启动 vLLM
-
-在终端 A 运行：
+单机联调只需在一个终端运行：
 
 ```bash
 conda activate approval
 cd /项目绝对路径/IntelligentApproval
-bash scripts/algorithm/serve_vllm_qwen3_8b.sh
+bash scripts/open_service.sh
 ```
 
-该进程会持续占用终端。另一个终端运行：
+该脚本在后台静默按依赖顺序拉起并逐个等待就绪：PostgreSQL、Redis、vLLM、Alembic 迁移、FastAPI、一个
+Celery worker 和唯一的 Celery beat。每个服务就绪会打印一行 `✓`，全部就绪后打印各服务地址并退出，把终端
+还给你继续后续操作。各服务日志集中在 `runtime/services/*.log`。
+
+- 使用企业已有的 PostgreSQL/Redis 实例时，只需在 `config/runtime.env` 写好连接地址；这台机器上仍会尝试
+  启动本地容器化实例，如不需要可自行删去脚本中的基础设施段落。
+- vLLM 首次加载模型较慢，脚本默认最多等待 6 分钟（`VLLM_READY_TRIES` 可覆盖）。
+- conda 环境名、PostgreSQL 数据目录、端口沿用脚本内默认值，可用 `APP_CONDA_ENV`、`INFRA_CONDA_ENV`、
+  `PG_DATA_DIR` 等环境变量覆盖。
+
+停止全部服务（顺序与启动相反）：
 
 ```bash
-bash scripts/algorithm/check_vllm.sh
+bash scripts/close_service.sh
 ```
 
-能返回 `/v1/models` JSON 才继续。
+正式生产环境不使用这两个编排脚本，而应由 systemd、Supervisor 或 Kubernetes 分别监管
+`scripts/algorithm/serve_vllm_qwen3_8b.sh`、`scripts/backend/run_api.sh`、`run_worker.sh`、`run_beat.sh`
+等前台入口，并保证全系统只有一个 beat 实例。
 
-## 5. 启动后端
+## 4. 分层验证
 
-首次单机联调在终端 B 运行：
-
-```bash
-conda activate approval
-cd /项目绝对路径/IntelligentApproval
-bash scripts/backend/run_backend.sh
-```
-
-该入口先执行 Alembic 迁移，再同时启动 FastAPI、一个 Celery worker 和唯一的 Celery beat。正式生产环境应由
-systemd、Supervisor 或 Kubernetes 分别监管 `run_api.sh`、`run_worker.sh`、`run_beat.sh`，并保证全系统只有
-一个 beat 实例。
-
-## 6. 分层验证
-
-终端 C 先检查依赖：
+先检查依赖：
 
 ```bash
 bash scripts/backend/check_services.sh
