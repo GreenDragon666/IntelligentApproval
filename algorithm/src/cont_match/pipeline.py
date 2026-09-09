@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,8 @@ def prepare_case(
     source_file = report.name
     artifacts = Path(artifacts_dir) if artifacts_dir is not None else None
     converted_pdf_path = artifacts / "converted_source.pdf" if artifacts is not None else None
+    t_extract = time.perf_counter()
+    print(f"[{time.strftime('%H:%M:%S')}] 步骤一 开始文档解析：{source_file}", flush=True)
     extracted = extract_document(report, document_page_1_pdf_page=document_page_1_pdf_page, converted_pdf_output=converted_pdf_path)
     pages = extracted.pages
     if not any(page.text for page in pages):
@@ -119,11 +122,14 @@ def prepare_case(
     )
     if not sections:
         raise ValueError("文档未生成可匹配章节")
+    print(f"[{time.strftime('%H:%M:%S')}] 步骤一 完成：{len(sections)} 章节，耗时 {time.perf_counter() - t_extract:.1f}s", flush=True)
 
     policy_rules = load_policy_rules(rules_path)
     matched_rules: list[MatchedRule] = []
     match_artifacts: list[dict[str, Any]] = []
 
+    t_retrieval = time.perf_counter()
+    print(f"[{time.strftime('%H:%M:%S')}] 步骤二 开始召回：{len(policy_rules)} 条规则（{'混合' if use_embedding else '字符'}）", flush=True)
     embedding_error = ""
     if use_embedding:
         try:
@@ -144,8 +150,11 @@ def prepare_case(
     selections: dict[int, tuple[list[SectionCandidate], str, str]] = {}
     for rule, candidates in ranked:
         selections[rule.rule_id] = (_retrieval_selection(candidates, evidence_count=evidence_count, minimum_score=minimum_score), retrieval_method, "")
+    print(f"[{time.strftime('%H:%M:%S')}] 步骤二 召回完成（{retrieval_method}），耗时 {time.perf_counter() - t_retrieval:.1f}s", flush=True)
     if use_llm:
         workers = max(1, match_workers or settings.matching_workers)
+        t_rerank = time.perf_counter()
+        print(f"[{time.strftime('%H:%M:%S')}] 步骤二 LLM 重排开始，并发 {workers}", flush=True)
         errors: list[tuple[int, Exception]] = []
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="content-match") as pool:
             futures = {pool.submit(select_candidates, rule, candidates, max_selected=evidence_count): (rule, candidates) for rule, candidates in ranked if candidates}
@@ -170,10 +179,11 @@ def prepare_case(
                 completed += 1
                 interval = max(1, total // 10)
                 if completed == total or completed % interval == 0:
-                    print(f"步骤二 LLM 重排进度: {completed}/{total}", flush=True)
+                    print(f"[{time.strftime('%H:%M:%S')}] 步骤二 LLM 重排进度: {completed}/{total}", flush=True)
         if strict_llm and errors:
             rule_id, exc = sorted(errors, key=lambda item: item[0])[0]
             raise RuntimeError(f"规则 {rule_id} 的本地 LLM 匹配失败: {type(exc).__name__}: {exc}") from exc
+        print(f"[{time.strftime('%H:%M:%S')}] 步骤二 LLM 重排完成，耗时 {time.perf_counter() - t_rerank:.1f}s", flush=True)
 
     for rule, candidates in ranked:
         selected, selection_method, llm_error = selections[rule.rule_id]

@@ -26,7 +26,7 @@ class Settings:
     # —— 步骤三：短输出语义判定与并发 ——
     semantic_workers: int = int(os.getenv("SEMANTIC_WORKERS", "4"))
     matching_workers: int = int(os.getenv("MATCHING_WORKERS", "4"))
-    semantic_max_tokens: int = int(os.getenv("SEMANTIC_MAX_TOKENS", "768"))
+    semantic_max_tokens: int = int(os.getenv("SEMANTIC_MAX_TOKENS", "2048"))
     semantic_max_retries: int = int(os.getenv("SEMANTIC_MAX_RETRIES", "1"))
     semantic_max_evidence_chars: int = int(os.getenv("SEMANTIC_MAX_EVIDENCE_CHARS", "16000"))
     semantic_max_chars_per_evidence: int = int(os.getenv("SEMANTIC_MAX_CHARS_PER_EVIDENCE", "8000"))

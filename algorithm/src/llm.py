@@ -23,6 +23,7 @@ def chat(
     temperature: float = 0.1,
     max_tokens: int = 4096,
     *,
+    top_p: float | None = None,
     base_url: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
@@ -33,11 +34,14 @@ def chat(
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
+    # 思考模式建议配非贪婪采样，top_p 仅在显式传入时下发，其余调用维持原行为。
+    sampling = {"top_p": top_p} if top_p is not None else {}
     resp = client.chat.completions.create(
         model=model or settings.llm_model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
+        **sampling,
     )
     return resp.choices[0].message.content or ""
 

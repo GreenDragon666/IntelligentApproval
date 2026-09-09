@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
@@ -164,6 +165,8 @@ def run_case(
     cache = DecisionCache(cache_dir)
     workers = max(1, max_workers or settings.semantic_workers)
     runs: list[RuleRun | None] = [None] * len(selected)
+    started = time.perf_counter()
+    print(f"[{time.strftime('%H:%M:%S')}] 步骤三 开始：{len(selected)} 条规则，并发 {workers}", flush=True)
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rule-check") as pool:
         futures = {
             pool.submit(_run_one, rule, cache=cache, enable_llm=enable_llm, force_recheck=force_recheck, llm_review=llm_review, rollback=rule.rule_id in rollback_ids): (index, rule)
@@ -180,5 +183,6 @@ def run_case(
             completed += 1
             interval = max(1, total // 10)
             if completed == total or completed % interval == 0:
-                print(f"步骤三规则校验进度: {completed}/{total}", flush=True)
+                print(f"[{time.strftime('%H:%M:%S')}] 步骤三规则校验进度: {completed}/{total}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] 步骤三 完成：{total} 条，耗时 {time.perf_counter() - started:.1f}s", flush=True)
     return ApprovalReport(case_id=case.case_id, source_file=case.source.file, rules=[run for run in runs if run is not None])

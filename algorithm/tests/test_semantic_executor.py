@@ -34,13 +34,15 @@ class SemanticExecutorTest(unittest.TestCase):
         self.assertNotIn("虚构输入表", prompt)
 
     @patch("src.rule_check.semantic.llm.chat")
-    def test_invalid_quote_is_retried(self, chat) -> None:
-        invalid = {"status": "violation", "summary": "x", "findings": [{"evidence_index": 0, "quote": "不存在的原文", "reason": "x"}], "confidence": 0.8, "missing_inputs": []}
-        valid = {"status": "pass", "summary": "未明确触发", "analysis": "现有证据不足以支持违规，pass结论合理。", "findings": [], "confidence": 0.7, "missing_inputs": []}
-        chat.side_effect = [json.dumps(invalid, ensure_ascii=False), json.dumps(valid, ensure_ascii=False)]
+    def test_invalid_quote_is_kept_unverified(self, chat) -> None:
+        # 引用无法逐字回映射时不再重试/清零，保留判定与原始引用，并计入 unverified_quotes。
+        invalid = {"status": "violation", "summary": "x", "analysis": "证据显示评分标准不可操作，违规结论合理。", "findings": [{"evidence_index": 0, "quote": "不存在的原文", "reason": "x"}], "confidence": 0.8, "missing_inputs": []}
+        chat.return_value = json.dumps(invalid, ensure_ascii=False)
         evaluation = evaluate_semantic(self.rule)
-        self.assertEqual(evaluation.result.status, Status.PASS)
-        self.assertEqual(evaluation.attempts, 2)
+        self.assertEqual(evaluation.result.status, Status.VIOLATION)
+        self.assertEqual(evaluation.attempts, 1)
+        self.assertEqual(evaluation.result.findings[0].quote, "不存在的原文")
+        self.assertEqual(evaluation.result.metrics.get("unverified_quotes"), 1)
 
     @patch("src.rule_check.semantic.llm.chat")
     def test_pdf_whitespace_quote_is_mapped_back_to_source(self, chat) -> None:
