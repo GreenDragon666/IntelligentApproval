@@ -1,7 +1,7 @@
 # 招标文件智能合规审批
 
 系统保持“目录提取 → 内容匹配 → 规则校验”三步结构。规则始终由 `--policy-rules` 指定的
-JSON/XLSX 提供；第三步读取同一行的“检查方式”，不再让大模型运行时生成 Python checker。
+JSON 提供（由本项目之外的程序统一转换，不再解析 Excel/PDF）；第三步读取同一行的“检查方式”，不再让大模型运行时生成 Python checker。
 
 ## 1. 当前架构
 
@@ -13,7 +13,7 @@ JSON/XLSX 提供；第三步读取同一行的“检查方式”，不再让大�
   文本、目录、章节、物理页/文件内页码
   │
   ▼
-步骤二 src/cont_match  ◀── --policy-rules 规则 JSON/XLSX
+步骤二 src/cont_match  ◀── --policy-rules 规则 JSON
   字符 TF-IDF + BGE-M3 混合召回 + 可选并发 Qwen 重排
   │
   ▼
@@ -58,19 +58,20 @@ scripts/run_batch.py         # 批量入口
 
 ## 2. “检查方式”路由
 
-规则表仍通过现有参数传入：
+规则由本项目之外的程序统一转成 JSON 后传入（不再解析 Excel/PDF）：
 
 ```bash
---policy-rules /path/to/规则.xlsx
+--policy-rules /path/to/policy_rules.json
 ```
 
-读取列包括：
+JSON 顶层为 `{version, rules:[...]}` 或直接规则数组，每条规则字段：
 
-- `序号` → `rule_id`
-- `重点排查情形` → `rule_raw`
-- `触发逻辑公式` → `rule_text`
-- `检查方式` → `check_method`
-- `结构化数据展示字段` → `structured_fields`
+- `rule_id`（整数，缺省用行号）
+- `rule_raw` → 重点排查情形（必填）
+- `rule_text` → 触发逻辑公式，**对象**，含 `description`/`legal_basis`/`formula`/`dev_note` 四个可选子字段；载入时按 `【描述】/【法规依据】/【公式】/【开发说明】` 顺序重组为块字符串（也兼容纯字符串）
+- `check_method` → 检查方式（缺省“大模型分析”）
+- `structured_fields` → 结构化数据展示字段
+- `match_hints` → 仅用于步骤二召回的提示，不进最终输出
 
 当前路由规则非常明确：只要“检查方式”的组合中包含 `结构化数据检查`，就走全局确定性执行器；
 其他方法，包括关键词匹配、大模型分析、政策库匹配及其组合，走本地 Qwen 语义判定。
@@ -239,7 +240,7 @@ reports/
 ```bash
 python main.py \
   --input reports/report_5/matched/rules_matched.json \
-  --policy-rules files/规则.xlsx
+  --policy-rules files/policy_rules.json
 ```
 
 `--input` 属于当前 `reports/` 内的续跑/重检，不会在启动时清空目录，否则会删除它正要读取的 JSON
@@ -278,7 +279,7 @@ python main.py \
 ```bash
 python prepare_case.py \
   --one_report_path files/docs/招标文件2.pdf \
-  --policy-rules files/规则.xlsx \
+  --policy-rules files/policy_rules.json \
   --use-llm \
   --strict-llm \
   --match-workers 4
@@ -289,7 +290,7 @@ python prepare_case.py \
 ```bash
 python main.py \
   --one_report_path files/docs/招标文件2.pdf \
-  --policy-rules files/规则.xlsx \
+  --policy-rules files/policy_rules.json \
   --use-llm \
   --preprocess-only
 ```
@@ -297,7 +298,7 @@ python main.py \
 只运行步骤三：
 
 ```bash
-python main.py --input reports/report_5/matched/rules_matched.json --policy-rules files/规则.xlsx
+python main.py --input reports/report_5/matched/rules_matched.json --policy-rules files/policy_rules.json
 ```
 
 ## 8. 支持的招标文档

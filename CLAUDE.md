@@ -45,12 +45,14 @@
 
 ## 数据契约
 
+政策规则输入契约：由本项目之外的程序统一转成 JSON（`data/policy_rules.json`，路径见 `POLICY_RULES_PATH`），`algorithm/src/cont_match/rules.py` 只读 JSON、不再解析 Excel/PDF。顶层为 `{version, rules:[...]}` 或直接规则数组。每条规则字段：`rule_id`（整数）、`rule_raw`（重点排查情形，必填）、`rule_text`（触发逻辑公式，对象，含 `description`/`legal_basis`/`formula`/`dev_note` 四个可选子字段，载入时按 `【描述】/【法规依据】/【公式】/【开发说明】` 顺序重组为块字符串供 `rule_parts` 解析）、`check_method`（检查方式，缺省“大模型分析”）、`structured_fields`、`match_hints`（仅用于步骤二召回，不进最终输出）。`rule_text` 也兼容纯字符串。
+
 算法正式匹配契约位于 `algorithm/src/rule_schema.py`：
 
 - `source` 只包含 `file`；
 - `rule_id` 为整数；
 - `rule_raw` 对应“重点排查情形”；
-- `rule_text` 对应“触发逻辑公式”；
+- `rule_text` 对应“触发逻辑公式”（此处为重组后的块字符串）；
 - `check_method` 对应“检查方式”；
 - `structured_fields` 对应“结构化数据展示字段”；
 - `evidence` 包含原文、章节和 PDF/文件内双页码。

@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     storage_root: Path = _REPOSITORY_ROOT / "runtime/reviews"
     algorithm_root: Path = _REPOSITORY_ROOT / "algorithm"
-    policy_rules_path: Path = _REPOSITORY_ROOT / "data/招标文件预警规则梳理_V1.0_yy_20260610.xlsx"
+    policy_rules_path: Path = _REPOSITORY_ROOT / "data/policy_rules.json"
     max_upload_bytes: int = 30 * 1024 * 1024
     max_documents_per_review: int = 10
     upload_chunk_bytes: int = 1024 * 1024

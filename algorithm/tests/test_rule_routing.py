@@ -26,6 +26,26 @@ class RuleRoutingTest(unittest.TestCase):
         self.assertEqual(rule.check_method, "结构化数据检查")
         self.assertEqual(rule.structured_fields, "金额字段")
 
+    def test_json_policy_loader_reassembles_nested_rule_text(self) -> None:
+        from src.rule_parts import legal_basis, rule_description
+        rows = {"version": "1.0", "rules": [{"rule_id": 3, "rule_raw": "检查期限", "rule_text": {"description": "检查公告期限是否充分。", "legal_basis": "法定期限至少5日。", "formula": "IF 天数 < 5 THEN 违规", "dev_note": "输入：公告发布日期"}, "check_method": "大模型分析", "match_hints": ["招标公告"]}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "rules.json"
+            path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+            rule = load_policy_rules(path)[0]
+        # 子字段被重组为块字符串，下游 rule_parts 能原样解析出描述与法规依据。
+        self.assertEqual(rule_description(rule.rule_text), "检查公告期限是否充分。")
+        self.assertEqual(legal_basis(rule.rule_text), "法定期限至少5日。")
+        self.assertIn("【公式】", rule.rule_text)
+        self.assertEqual(rule.match_hints, ["招标公告"])
+
+    def test_non_json_rule_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "rules.xlsx"
+            path.write_text("irrelevant", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_policy_rules(path)
+
     def test_old_matched_json_defaults_to_semantic(self) -> None:
         rule = MatchedRule.from_dict({"rule_id": 1, "rule_raw": "旧规则", "rule_text": "旧逻辑", "evidence": []})
         self.assertEqual(rule.check_method, "大模型分析")

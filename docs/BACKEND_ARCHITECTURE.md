@@ -102,7 +102,7 @@ scripts/lib/
 
 ```text
 STORAGE_ROOT/<review_uuid>/
-├── policy_rules/<rules.xlsx>          # 创建任务时快照
+├── policy_rules/<policy_rules.json>   # 创建任务时快照
 ├── summary.json                       # 前端汇总契约
 ├── summary_brief.md                   # 本次运行执法简报
 └── documents/<document_uuid>/
