@@ -29,6 +29,15 @@ bash scripts/setup_runtime_config.sh
 bash scripts/check_runtime_config.sh
 ```
 
+从旧版本升级时，`setup_runtime_config.sh` 不会覆盖已有配置。请手动确认以下检索参数已经同步为新版默认值：
+
+```dotenv
+ALGORITHM_CANDIDATE_COUNT=16
+LOCAL_LLM_CANDIDATE_CHARS=1000
+LOCAL_EMBED_CHUNK_CHARS=800
+LOCAL_EMBED_CHUNK_OVERLAP=120
+```
+
 ## 2. 不连接外部服务的代码测试
 
 ```bash

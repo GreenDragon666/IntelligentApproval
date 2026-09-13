@@ -37,6 +37,7 @@ src/
 ├── rule_check/              # 步骤三：全局执行器、语义判定、缓存、报告
 │   ├── methods.py           # 规范化“检查方式”并路由
 │   ├── structured.py        # 金额/比例/日期正则提取与确定性计算
+│   ├── policy_structured.py # 履约保证金、公示期、预付款等高频政策模板
 │   ├── field_resolver.py    # 预设字段与正则候选位置的语义别名映射
 │   ├── semantic.py          # 一次调用完成短 JSON 语义判定与解释
 │   ├── explainer.py         # 为确定性结果补充 LLM 分析，不修改结果
@@ -92,6 +93,8 @@ JSON 顶层为 `{version, rules:[...]}` 或直接规则数组，每条规则字�
 `structured_fields` 只作字段别名提示。结构化操作直接从 `rule_raw + 法规依据` 派生。
 
 确定性执行器是全局代码，不按案件、规则生成 Python。金额、百分比和日期值始终由正则提取。
+对“履约保证金只能现金”、“中标候选人公示期不足3日”和“施工预付款低于10%”三类高频规则，
+系统使用经测试的固定规则模板，不再从自然语言临时生成公式。
 当预设字段名没有出现在证据中时，本地 Qwen 只负责将该字段映射到正则已经发现的候选位置，模型
 看不到候选的实际数值，也不负责读取或计算数值。映射后仍不完整时返回 `warning` 供人工复核，
 不会把生成字段的缺失写成 `insufficient_input`。
@@ -106,11 +109,11 @@ JSON 顶层为 `{version, rules:[...]}` 或直接规则数组，每条规则字�
 `requires_review=true` 时，系统再执行一次完整语义判定，并同时保留 `structured_result` 和最终 `result`，
 方便比较“正则为什么无法完成”和“语义兜底如何判断”。
 
-步骤二以 `rule_raw` 为主查询、法规依据为辅助查询，同时计算字符 TF-IDF 和 BGE-M3 embedding
-相似度，默认按55%字符分数、45%向量分数融合。长章节先按1400字符、重叠200字符切片，章节向量分数
-取最相关切片，避免只编码章节开头。融合召回 top-k 后由 Qwen 重排，最终每条规则最多保留3个 evidence。
-公式和结构化字段不参与召回；如果 Qwen 全部拒绝候选，达到融合分数阈值的候选会作为兜底 evidence
-保留，避免步骤三把一次空选误解成输入资料缺失。
+步骤二把原章节进一步切成默认800字、重叠120字的小文本块。`rule_raw`、【描述】、`match_hints`和【法规依据】
+分别编码为多个查询，法规依据降权，避免通用法律长文淹没具体审查主题。系统再融合字符 TF-IDF、关键表述命中和
+BGE-M3 embedding，默认召回16个小文本块交给 Qwen 重排。重排结果与原检索分数融合，不再允许一次模型选择完全覆盖强召回结果。
+最终仍严格保留最多3个 evidence，且 evidence 是真正命中的小文本块，不再回退为数页的大章节。
+公式和结构化字段不参与召回。
 
 ## 3. 启动 vLLM
 
@@ -182,7 +185,7 @@ SEMANTIC_WORKERS=4
 服务脚本默认设置 `--max-num-seqs 16` 并启用 prefix caching，足以容纳业务端4～8路并发；
 `LLM_MAX_NUM_SEQS` 只是服务端并发上限，实际并发仍由 `MATCHING_WORKERS`/`SEMANTIC_WORKERS` 控制。
 
-步骤三判定和解释均使用 `/no_think`，默认最多768 token；语义判定只允许一次格式修正重试。Qwen
+步骤三判定和解释均使用 `/no_think`，默认最多2048 token；语义判定只允许一次格式修正重试。Qwen
 仍可能输出空的 `<think></think>` 包装，因此所有步骤三模型调用统一从混合文本中提取第一个 JSON，
 兼容 think 标签、Markdown 代码块和前后说明文字：
 
@@ -190,7 +193,7 @@ SEMANTIC_WORKERS=4
 |---|---:|---|
 | `MATCHING_WORKERS` | `4` | 步骤二并发重排数 |
 | `SEMANTIC_WORKERS` | `4` | 步骤三并发语义判定数 |
-| `SEMANTIC_MAX_TOKENS` | `768` | 单条判定最大输出 |
+| `SEMANTIC_MAX_TOKENS` | `2048` | 单条判定最大输出 |
 | `SEMANTIC_MAX_RETRIES` | `1` | JSON/引用校验失败后的重试次数 |
 | `SEMANTIC_MAX_EVIDENCE_CHARS` | `16000` | 单规则发送的证据字符总量 |
 | `LOCAL_LLM_MAX_CONNECTIONS` | `16` | HTTP 连接池上限 |
@@ -199,8 +202,8 @@ SEMANTIC_WORKERS=4
 | `LOCAL_EMBED_DEVICE` | 自动 | embedding 运行设备，如 `cpu`、`cuda:0` |
 | `LOCAL_EMBED_BATCH_SIZE` | `16` | embedding 批量编码大小 |
 | `LOCAL_EMBED_WEIGHT` | `0.45` | 融合分数中的 embedding 权重 |
-| `LOCAL_EMBED_CHUNK_CHARS` | `1400` | 长章节向量切片字符数 |
-| `LOCAL_EMBED_CHUNK_OVERLAP` | `200` | 相邻向量切片重叠字符数 |
+| `LOCAL_EMBED_CHUNK_CHARS` | `800` | 检索文本块字符数 |
+| `LOCAL_EMBED_CHUNK_OVERLAP` | `120` | 相邻检索块重叠字符数 |
 
 一般语义规则调用一次模型；结构化规则调用一次结果解释，若字段名需要近义映射，可能再增加一次
 仅选择正则候选位置的调用。`--review` 会在这些常规分析之外再调用一次独立模型复核，默认不要开启；
@@ -305,7 +308,7 @@ python main.py --input reports/report_5/matched/rules_matched.json --policy-rule
 
 | 格式 | 提取方式 | 页码口径 |
 |---|---|---|
-| PDF | PyMuPDF，失败时 pypdf/pdftotext | 原始 PDF 物理页 |
+| PDF | PyMuPDF；返回空文本或失败时自动降级到 pypdf/pdftotext | 原始 PDF 物理页 |
 | DOCX/DOCM | LibreOffice 转 PDF；不可用时解析 Word XML | 转换 PDF 页或逻辑页 |
 | DOC/ODT/RTF/WPS | LibreOffice 转 PDF | 转换 PDF 页 |
 | TXT/Markdown | UTF-8/GB18030，换页符切页 | 逻辑页 |
