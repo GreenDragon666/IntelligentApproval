@@ -87,6 +87,9 @@ def _rule_list(lines: list[str], title: str, values: list[str]) -> None:
 
 def to_brief_markdown(reports: Sequence[ApprovalReport], failures: Sequence[tuple[str, str]] = ()) -> str:
     """渲染一次完整运行的执法简报；批量时所有案件只写一个文件。"""
+    import datetime
+    cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     totals = {status.value: 0 for status in Status}
     pipeline_errors = 0
     analysis_errors = 0
@@ -96,9 +99,11 @@ def to_brief_markdown(reports: Sequence[ApprovalReport], failures: Sequence[tupl
             totals[status.value] += int(summary[status.value])
         pipeline_errors += int(summary["pipeline_error"])
         analysis_errors += int(summary["analysis_error"])
-    lines = ["# 招标文件审批执法简报", "", f"本次完成校验 **{len(reports)}** 份文件，处理失败 **{len(failures)}** 份。", "", f"规则结果合计：通过 **{totals['pass']}**，预警 **{totals['warning']}**，违规 **{totals['violation']}**，输入不足 **{totals['insufficient_input']}**，执行失败 **{totals['error']}**，分析生成失败 **{analysis_errors}**，流程错误 **{pipeline_errors}**。", "", "## 文件概览", "", "| 招标文件 | 总体结论 | 通过 | 预警 | 违规 | 输入不足 | 执行失败 | 分析失败 | 流程错误 |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+
+    lines = ["# 招标文件审批执法简报", "", f"完成时间: {cur_time}", "", f"本次完成校验 **{len(reports)}** 份文件，处理失败 **{len(failures)}** 份。", "", f"规则结果合计：通过 **{totals['pass']}**，预警 **{totals['warning']}**，违规 **{totals['violation']}**，输入不足 **{totals['insufficient_input']}**，执行失败 **{totals['error']}**，分析生成失败 **{analysis_errors}**，流程错误 **{pipeline_errors}**。", "", "## 文件概览", "", "| 招标文件 | 总体结论 | 通过 | 预警 | 违规 | 输入不足 | 执行失败 | 分析失败 | 流程错误 |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for report in reports:
         summary = report.to_dict()["summary"]
+        lines.append(f"File id: {report.case_id}; File name: {report.source_file}")
         lines.append(f"| {_escape_table(report.source_file)} | {_OVERALL_LABEL.get(report.overall, report.overall)} | {summary['pass']} | {summary['warning']} | {summary['violation']} | {summary['insufficient_input']} | {summary['error']} | {summary['analysis_error']} | {summary['pipeline_error']} |")
     if not reports:
         lines.append("| 无成功完成的文件 | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 |")
