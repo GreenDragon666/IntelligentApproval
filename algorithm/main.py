@@ -65,7 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     matching = parser.add_argument_group("步骤二：内容匹配")
     matching.add_argument("--policy-rules", help="政策规则 JSON；处理新文档时必填，--input 时可用于刷新检查方式")
-    matching.add_argument("--candidate-count", type=int, default=8)
+    matching.add_argument("--candidate-count", type=int, default=16)
     matching.add_argument("--evidence-count", type=int, default=3, help="每条规则最终保留 evidence 数，最大为3")
     matching.add_argument("--minimum-score", type=float, default=0.03)
     matching.add_argument("--no-embedding", action="store_true", help="步骤二仅使用字符 TF-IDF 召回，不加载本地 embedding 模型")

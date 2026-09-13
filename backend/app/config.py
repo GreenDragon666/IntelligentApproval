@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     algorithm_enable_llm_check: bool = True
     algorithm_llm_review: bool = False
     algorithm_max_section_pages: int = 8
-    algorithm_candidate_count: int = 8
+    algorithm_candidate_count: int = 16
     algorithm_evidence_count: int = 3
     algorithm_minimum_score: float = 0.03
     algorithm_match_workers: int = Field(default=4, validation_alias="MATCHING_WORKERS")

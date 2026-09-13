@@ -9,11 +9,20 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.cont_match.llm_matcher import _candidate_excerpt
-from src.cont_match.pipeline import prepare_case
-from src.page_schema import PolicyRule
+from src.cont_match.pipeline import _merge_reranked_selection, prepare_case
+from src.page_schema import DocumentSection, PolicyRule, SectionCandidate
 
 
 class MatchingConcurrencyTest(unittest.TestCase):
+    def test_reranker_cannot_discard_all_strong_retrieval_candidates(self) -> None:
+        candidates = [
+            SectionCandidate(DocumentSection(f"章节{index}", index, index, index, index, f"候选{index}"), score)
+            for index, score in enumerate((0.90, 0.80, 0.70), start=1)
+        ]
+        selected = _merge_reranked_selection(candidates, [candidates[2]], evidence_count=2)
+        self.assertIn(candidates[0], selected)
+        self.assertIn(candidates[2], selected)
+
     def test_llm_excerpt_focuses_on_rule_match_in_late_section_text(self) -> None:
         rule = PolicyRule(rule_id=1, rule_raw="投标保证金比例不得超过限制", rule_text="生成内容")
         text = "无关内容" * 500 + "投标保证金比例不得超过限制" + "尾部" * 500

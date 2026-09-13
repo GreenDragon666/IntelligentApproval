@@ -8,7 +8,7 @@ import re
 from config import settings
 from .. import llm
 from ..page_schema import PolicyRule, SectionCandidate
-from ..rule_parts import legal_basis
+from ..rule_parts import legal_basis, rule_description
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
@@ -71,6 +71,7 @@ def select_candidates(
     payload = {
         "rule_id": rule.rule_id,
         "rule_raw": rule.rule_raw,
+        "description_reference": rule_description(rule.rule_text),
         "legal_basis_reference": legal_basis(rule.rule_text),
         "check_method": rule.check_method,
         "candidates": [
@@ -88,7 +89,7 @@ def select_candidates(
     }
     prompt = f'''/no_think
 你负责把“重点排查情形”匹配到最相关的招标文件章节。
-rule_raw 决定审查主题，legal_basis_reference 是补充法规依据，可用于理解具体法律概念、数值和期限。不得使用未提供的公式、开发说明或字段要求，也不要因为只出现通用法律词汇就选择。
+rule_raw 决定审查主题；description_reference 只帮助理解常见表述；legal_basis_reference 可补充明确的法律概念、数值和期限。三者冲突时以 rule_raw 和法规依据为准。不得使用未提供的公式、开发说明或字段要求，也不要因为只出现通用法律词汇就选择。
 如果没有候选真正相关，selected_indices 返回空数组。
 只输出 JSON：{{"selected_indices": [整数下标], "reason": "简短理由"}}。
 最多选择 {max_selected} 个，禁止输出 Markdown。

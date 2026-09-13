@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
-from src.cont_match.retrieval import HybridSectionMatcher
+from src.cont_match.retrieval import HybridSectionMatcher, LexicalSectionMatcher
+from config import settings
 from src.cont_match.pipeline import prepare_case
 from src.page_schema import DocumentSection, PolicyRule
 
@@ -45,6 +47,17 @@ class HybridRetrievalTest(unittest.TestCase):
         self.assertEqual(ranked[1][0].section.title, "资格要求")
         self.assertIsNotNone(ranked[0][0].lexical_score)
         self.assertEqual(ranked[0][0].embedding_score, 1.0)
+
+    def test_long_section_keeps_the_matching_chunk_instead_of_whole_section(self) -> None:
+        sections = [DocumentSection("投标人须知", 10, 18, 1, 9, "无关内容" * 100 + "\n[PDF第15页]\n中标候选人公示期为2日。" + "其他内容" * 100)]
+        rule = PolicyRule(4, "中标候选人公示期不足3日", "【法规依据】公示期不得少于3日。")
+        with patch.object(settings, "embed_chunk_chars", 120), patch.object(settings, "embed_chunk_overlap", 20):
+            ranked = LexicalSectionMatcher(sections).rank(rule, top_k=1)
+
+        self.assertEqual(len(ranked), 1)
+        self.assertIn("公示期为2日", ranked[0].section.text)
+        self.assertLess(len(ranked[0].section.text), len(sections[0].text))
+        self.assertEqual(ranked[0].section.pdf_end, 15)
 
 
 if __name__ == "__main__":

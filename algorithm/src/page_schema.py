@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-from .rule_parts import legal_basis
+from .rule_parts import legal_basis, rule_description
 
 
 @dataclass(frozen=True)
@@ -47,8 +47,28 @@ class PolicyRule:
 
     @property
     def query_text(self) -> str:
-        """返回规则原文、法规依据和可选章节提示；公式/开发说明不参与。"""
-        return "\n".join(value for value in [self.rule_raw, legal_basis(self.rule_text), *self.match_hints] if value)
+        """返回面向语义召回的短查询；避免长法规条文淹没审查主题。"""
+        return "\n".join(value for value in [self.rule_raw, rule_description(self.rule_text), *self.match_hints] if value)
+
+    @property
+    def query_variants(self) -> list[tuple[str, float]]:
+        """返回独立编码的查询变体及权重，公式和开发说明始终不参与。"""
+        variants: list[tuple[str, float]] = [(self.rule_raw, 1.0)]
+        description = rule_description(self.rule_text)
+        if description:
+            variants.append((description, 0.9))
+        variants.extend((hint, 1.0) for hint in self.match_hints if hint)
+        basis = legal_basis(self.rule_text)
+        if basis:
+            variants.append((basis, 0.55))
+        unique: list[tuple[str, float]] = []
+        seen: set[str] = set()
+        for text, weight in variants:
+            compact = text.strip()
+            if compact and compact not in seen:
+                seen.add(compact)
+                unique.append((compact, weight))
+        return unique
 
 
 @dataclass(frozen=True)

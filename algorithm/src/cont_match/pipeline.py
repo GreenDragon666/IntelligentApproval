@@ -66,6 +66,13 @@ def _retrieval_selection(
     ][:evidence_count]
 
 
+def _merge_reranked_selection(candidates: list[SectionCandidate], selected: list[SectionCandidate], *, evidence_count: int) -> list[SectionCandidate]:
+    """融合 Qwen 选择与检索分数，避免重排一次性丢掉强召回结果。"""
+    selected_ids = {id(candidate) for candidate in selected}
+    ranked = sorted(candidates, key=lambda candidate: candidate.score + (0.20 if id(candidate) in selected_ids else 0.0), reverse=True)
+    return ranked[:evidence_count]
+
+
 def prepare_case(
     *,
     case_id: str,
@@ -75,7 +82,7 @@ def prepare_case(
     artifacts_dir: str | Path | None = None,
     document_page_1_pdf_page: int | None = None,
     max_section_pages: int = 8,
-    candidate_count: int = 8,
+    candidate_count: int = 16,
     evidence_count: int = MAX_EVIDENCE_COUNT,
     minimum_score: float = 0.03,
     use_embedding: bool = True,
@@ -165,7 +172,7 @@ def prepare_case(
                 try:
                     selected = future.result()
                     if selected:
-                        selections[rule.rule_id] = (selected, f"local_qwen_{retrieval_method}", "")
+                        selections[rule.rule_id] = (_merge_reranked_selection(candidates, selected, evidence_count=evidence_count), f"local_qwen_{retrieval_method}", "")
                     else:
                         previous, _method, _error = selections[rule.rule_id]
                         # Qwen 的“全部拒绝”不能抹掉第一阶段已经达到阈值的候选。
@@ -258,8 +265,11 @@ def prepare_case(
                 "use_llm": use_llm,
                 "use_embedding": use_embedding,
                 "retrieval_method": retrieval_method,
+                "retrieval_unit": "text_chunk",
                 "embedding_model": settings.embed_model if use_embedding else None,
                 "embedding_error": embedding_error or None,
+                "embedding_chunk_chars": settings.embed_chunk_chars,
+                "embedding_chunk_overlap": settings.embed_chunk_overlap,
                 "strict_llm": strict_llm,
                 "candidate_count": candidate_count,
                 "evidence_count": evidence_count,

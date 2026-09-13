@@ -19,7 +19,7 @@ class Settings:
     # 本地权重目录（起服务时用）；客户端一般不直接读这个路径
     llm_model_path: str = os.getenv("LOCAL_LLM_MODEL_PATH", _DEFAULT_LLM_MODEL_DIR)
     llm_api_key: str = os.getenv("LOCAL_LLM_API_KEY", "EMPTY")
-    llm_candidate_chars: int = int(os.getenv("LOCAL_LLM_CANDIDATE_CHARS", "1200"))
+    llm_candidate_chars: int = int(os.getenv("LOCAL_LLM_CANDIDATE_CHARS", "1000"))
     llm_timeout: float = float(os.getenv("LOCAL_LLM_TIMEOUT", "180"))
     llm_max_connections: int = int(os.getenv("LOCAL_LLM_MAX_CONNECTIONS", "16"))
 
@@ -36,8 +36,8 @@ class Settings:
     embed_device: str = os.getenv("LOCAL_EMBED_DEVICE", "cpu")
     embed_batch_size: int = int(os.getenv("LOCAL_EMBED_BATCH_SIZE", "16"))
     embed_weight: float = float(os.getenv("LOCAL_EMBED_WEIGHT", "0.45"))
-    embed_chunk_chars: int = int(os.getenv("LOCAL_EMBED_CHUNK_CHARS", "1400"))
-    embed_chunk_overlap: int = int(os.getenv("LOCAL_EMBED_CHUNK_OVERLAP", "200"))
+    embed_chunk_chars: int = int(os.getenv("LOCAL_EMBED_CHUNK_CHARS", "800"))
+    embed_chunk_overlap: int = int(os.getenv("LOCAL_EMBED_CHUNK_OVERLAP", "120"))
     embed_strict: bool = os.getenv("LOCAL_EMBED_STRICT", "0").lower() in {"1", "true", "yes", "on"}
 
     # —— 可选二次复核 ——
