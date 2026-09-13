@@ -16,6 +16,35 @@ def _rule(rule_text: str, text: str, fields: str, rule_id: int = 1, rule_raw: st
 
 
 class StructuredExecutorTest(unittest.TestCase):
+    def test_cash_only_performance_guarantee_is_violation(self) -> None:
+        rule = _rule("【法规依据】不得限定经营主体缴纳保证金的形式。", "履约保证金须以现金形式提交，不接受银行保函或保险保单。", "", rule_id=3, rule_raw="限定履约保证金只能以现金形式提交")
+        result = evaluate_structured(rule)
+        self.assertEqual(result.status, Status.VIOLATION)
+        self.assertTrue(result.metrics["policy_checker"])
+
+    def test_cash_or_guarantee_is_not_cash_only(self) -> None:
+        rule = _rule("【法规依据】不得限定经营主体缴纳保证金的形式。", "履约保证金的形式：银行转账等现金形式或者银行保函等非现金形式。", "", rule_id=3, rule_raw="限定履约保证金只能以现金形式提交")
+        self.assertEqual(evaluate_structured(rule).status, Status.PASS)
+
+    def test_project_specific_two_day_publicity_overrides_generic_three_days(self) -> None:
+        text = "通用条款：中标候选人公示期不得少于3日。\n投标人须知前附表：中标候选人公示期为2个工作日。"
+        rule = _rule("【法规依据】公示期不得少于3日。", text, "", rule_id=4, rule_raw="中标候选人公示期不足3日")
+        result = evaluate_structured(rule)
+        self.assertEqual(result.status, Status.VIOLATION)
+        self.assertEqual(result.metrics["days"], 2)
+
+    def test_advance_payment_policy_handles_zero_and_valid_percentage(self) -> None:
+        zero = _rule("【法规依据】预付比例不低于10%，不高于30%。", "本项目不支付预付款。", "", rule_id=5, rule_raw="施工项目预付款不得低于10%")
+        valid = _rule("【法规依据】预付比例不低于10%，不高于30%。", "开工预付款金额：20%签约合同价。", "", rule_id=5, rule_raw="施工项目预付款不得低于10%")
+        self.assertEqual(evaluate_structured(zero).status, Status.VIOLATION)
+        self.assertEqual(evaluate_structured(valid).status, Status.PASS)
+
+    def test_advance_payment_major_project_exception_requires_review(self) -> None:
+        rule = _rule("【法规依据】重大工程项目按年度工程计划逐年预付。", "本项目为重大工程项目，按年度工程计划逐年预付5%。", "", rule_id=5, rule_raw="施工项目预付款不得低于10%")
+        result = evaluate_structured(rule)
+        self.assertEqual(result.status, Status.WARNING)
+        self.assertTrue(result.metrics["major_project_exception"])
+
     def test_money_ratio_violation(self) -> None:
         rule = _rule("【公式】IF 投标保证金金额/项目估算价 > 0.02 OR 投标保证金金额 > 800000 THEN 标记为违规", "投标保证金金额：10万元\n合同估算价：300万元", "投标保证金金额字段、项目估算价字段", rule_raw="投标保证金不得超过项目估算价的2%，且不得超过80万元")
         result = evaluate_structured(rule)

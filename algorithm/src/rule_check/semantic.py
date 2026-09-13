@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 
 from config import settings
 from .. import llm
 from ..rule_parts import legal_basis, rule_description
 from ..rule_schema import Finding, MatchedRule, RuleResult, Status
 from .json_output import extract_json_object
+from .policy_structured import evaluate_known_policy_rule
 
 _ALLOWED_STATUSES = {Status.VIOLATION, Status.WARNING, Status.PASS, Status.INSUFFICIENT_INPUT}
+_ABSENCE_REASON = re.compile(r"未提及|未记载|未明确|未说明|无法判断|无法确认|没有提供")
+_REGION_MARKER = re.compile(r"本地|外地|异地|本市|本区|本省|户籍|户口|[一-鿿]{2,8}(?:省|市|区|县)")
 
 SYSTEM_PROMPT = """你是招标文件合规审查器。rule_raw（重点排查情形）决定审查主题；legal_basis_reference 是可参考的法规依据，可补充具体法律要求、数值和期限；description_reference 只用于帮助理解规则适用场景，不得单独据此新增阈值、条件或缺失输入；check_method 仅表示检查路线。严格依据规则和证据作答，不生成 Python 代码，不补充未提供的事实。
 可以先在 <think></think> 中推理，但思考结束后必须只输出一个 JSON 对象，不得再输出 Markdown 或多余文字。JSON 字段：
@@ -81,6 +85,47 @@ def _source_quote(text: str, quote: str) -> str | None:
     return text[positions[start]:positions[end] + 1]
 
 
+def _guard_result(rule: MatchedRule, result: RuleResult) -> RuleResult:
+    """让可验证的确定性事实优先于模型判断，并阻断常见低级误报。"""
+    policy_result = evaluate_known_policy_rule(rule)
+    if policy_result is not None and policy_result.status in {Status.PASS, Status.VIOLATION}:
+        if policy_result.status == result.status:
+            return replace(result, metrics={**result.metrics, "policy_guardrail": "confirmed"})
+        return replace(
+            policy_result,
+            analysis=f"确定性复核与大模型初判不一致，已以可回引的原文数值或形式为准。{policy_result.summary}",
+            metrics={**policy_result.metrics, "executor": "semantic_llm", "policy_guardrail": "overrode_llm"},
+        )
+
+    if result.status != Status.VIOLATION:
+        return result
+    reasoning = "\n".join([result.summary, *(finding.reason for finding in result.findings)])
+    if _ABSENCE_REASON.search(reasoning):
+        return RuleResult(
+            rule_id=rule.rule_id,
+            status=Status.PASS,
+            summary="当前证据未显示与规则明确抵触的内容。",
+            analysis="大模型初判主要依据‘未提及或未明确’推定违规；当前 evidence 只是召回片段，不能用局部未提及证明全文缺失，因此不保留该违规结论。",
+            legal_basis=result.legal_basis,
+            metrics={**result.metrics, "policy_guardrail": "absence_is_not_violation"},
+            confidence=0.7,
+        )
+
+    if "人员" in rule.rule_raw and "地区" in rule.rule_raw:
+        quotes = "\n".join(finding.quote for finding in result.findings)
+        if not _REGION_MARKER.search(quotes):
+            return RuleResult(
+                rule_id=rule.rule_id,
+                status=Status.PASS,
+                summary="证据中未出现人员地域限制。",
+                analysis="大模型初判引用了人员或社保要求，但引文中没有户籍、本地或具体行政区域限定，不足以触发本规则。",
+                legal_basis=result.legal_basis,
+                metrics={**result.metrics, "policy_guardrail": "missing_region_constraint"},
+                confidence=0.9,
+            )
+    return result
+
+
 def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
     try:
         status = Status(str(data["status"]).strip())
@@ -120,7 +165,7 @@ def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
     metrics: dict = {"executor": "semantic_llm"}
     if unverified:
         metrics["unverified_quotes"] = unverified
-    return RuleResult(
+    result = RuleResult(
         rule_id=rule.rule_id,
         status=status,
         summary=summary,
@@ -131,6 +176,7 @@ def _to_result(rule: MatchedRule, data: dict) -> RuleResult:
         confidence=confidence,
         missing_inputs=[str(value).strip() for value in data.get("missing_inputs") or [] if str(value).strip()],
     )
+    return _guard_result(rule, result)
 
 
 def evaluate_semantic(rule: MatchedRule) -> SemanticEvaluation:

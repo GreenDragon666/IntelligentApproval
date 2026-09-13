@@ -58,6 +58,37 @@ class SemanticExecutorTest(unittest.TestCase):
         self.assertEqual(evaluation.result.status, Status.PASS)
         self.assertEqual(evaluation.result.findings, [])
 
+    @patch("src.rule_check.semantic.llm.chat")
+    def test_policy_guardrail_rejects_violation_for_valid_advance_payment(self, chat) -> None:
+        self.rule = MatchedRule(rule_id=5, rule_raw="施工项目预付款不得低于10%", rule_text="【法规依据】预付比例不低于10%，不高于30%。", evidence=[MatchedEvidence(self.rule.evidence[0].location, "开工预付款金额：20%签约合同价。")], check_method="大模型分析")
+        chat.return_value = json.dumps({"status": "violation", "summary": "存在风险", "analysis": "20%符合下限，但材料预付款未说明。", "findings": [{"evidence_index": 0, "quote": "开工预付款金额：20%", "reason": "其他比例未说明"}], "confidence": 0.9}, ensure_ascii=False)
+        result = evaluate_semantic(self.rule).result
+        self.assertEqual(result.status, Status.PASS)
+        self.assertEqual(result.metrics["policy_guardrail"], "overrode_llm")
+
+    @patch("src.rule_check.semantic.llm.chat")
+    def test_policy_guardrail_recovers_violation_missed_by_llm(self, chat) -> None:
+        self.rule = MatchedRule(rule_id=4, rule_raw="中标候选人公示期不足3日", rule_text="【法规依据】公示期不得少于3日。", evidence=[MatchedEvidence(self.rule.evidence[0].location, "中标候选人公示期为2个自然日，自公示发布次日起算。")], check_method="大模型分析")
+        chat.return_value = json.dumps({"status": "pass", "summary": "未发现问题", "analysis": "模型错误地认为两日满足要求。", "findings": [], "confidence": 0.7}, ensure_ascii=False)
+        result = evaluate_semantic(self.rule).result
+        self.assertEqual(result.status, Status.VIOLATION)
+        self.assertEqual(result.metrics["policy_guardrail"], "overrode_llm")
+
+    @patch("src.rule_check.semantic.llm.chat")
+    def test_absence_in_retrieved_excerpt_cannot_prove_violation(self, chat) -> None:
+        chat.return_value = json.dumps({"status": "violation", "summary": "缺少要求", "analysis": "证据中未提及该项内容，因此违规。", "findings": [{"evidence_index": 0, "quote": "技术方案优秀得10分", "reason": "未明确其他要求"}], "confidence": 0.8}, ensure_ascii=False)
+        result = evaluate_semantic(self.rule).result
+        self.assertEqual(result.status, Status.PASS)
+        self.assertEqual(result.metrics["policy_guardrail"], "absence_is_not_violation")
+
+    @patch("src.rule_check.semantic.llm.chat")
+    def test_own_employee_social_security_is_not_a_region_constraint(self, chat) -> None:
+        self.rule = MatchedRule(rule_id=2, rule_raw="【其他主要人员要求】中不能限定地区", rule_text="【法规依据】不得排斥外地投标人。", evidence=[MatchedEvidence(self.rule.evidence[0].location, "拟派总监代表应为投标人的自有人员（在本单位缴纳社保人员）。")], check_method="大模型分析")
+        chat.return_value = json.dumps({"status": "violation", "summary": "限制外地人员", "analysis": "要求本单位缴纳社保，排斥外地人员。", "findings": [{"evidence_index": 0, "quote": "在本单位缴纳社保人员", "reason": "限制外地人员"}], "confidence": 0.9}, ensure_ascii=False)
+        result = evaluate_semantic(self.rule).result
+        self.assertEqual(result.status, Status.PASS)
+        self.assertEqual(result.metrics["policy_guardrail"], "missing_region_constraint")
+
 
 if __name__ == "__main__":
     unittest.main()

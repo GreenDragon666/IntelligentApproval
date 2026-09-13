@@ -9,6 +9,7 @@ from datetime import datetime
 from ..rule_parts import legal_basis
 from ..rule_schema import Finding, MatchedRule, RuleResult, Status
 from .field_resolver import ValueCandidate, resolve_field_values
+from .policy_structured import evaluate_known_policy_rule
 
 _DATE = re.compile(r"(?P<year>20\d{2})\s*[年./-]\s*(?P<month>\d{1,2})\s*[月./-]\s*(?P<day>\d{1,2})\s*日?(?:\s*(?P<hour>\d{1,2})\s*[时:]\s*(?P<minute>\d{1,2})?\s*分?)?")
 _MONEY = re.compile(r"(?P<value>\d[\d,]*(?:\.\d+)?)\s*(?P<unit>亿元|万元|万|元)")
@@ -468,6 +469,9 @@ def evaluate_structured(rule: MatchedRule, *, enable_semantic_aliases: bool = Fa
     formula = _derived_plan(rule)
     def complete(result: RuleResult) -> RuleResult:
         return replace(result, metrics={**result.metrics, "structured_executor": "regex", "derived_plan": formula.splitlines()})
+    policy_result = evaluate_known_policy_rule(rule)
+    if policy_result is not None:
+        return complete(policy_result)
     if not formula:
         return complete(_evaluate_supported(rule, formula))
     fields = _expected_numeric_fields(rule, formula)
