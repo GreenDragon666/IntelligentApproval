@@ -3,7 +3,7 @@ import { ChangeEvent, DragEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { hasReviewBackend, reviewService } from '../services/reviewService';
 
-const MAX = 30 * 1024 * 1024;
+const MAX = Number(import.meta.env.MAX_UPLOAD_BYTES);
 const SUPPORTED = /\.(pdf|doc|docx|docm|odt|rtf|wps|txt|md)$/i;
 
 export function UploadPage() {
@@ -17,7 +17,7 @@ export function UploadPage() {
     const invalid = incoming.find(file => !SUPPORTED.test(file.name));
     const large = incoming.find(file => file.size > MAX);
     if (invalid) return setError('支持 PDF、Word、ODT、RTF、WPS 和文本文件');
-    if (large) return setError('单个文件不能超过 30 MB');
+    if (large) return setError(`单个文件不能超过 ${(MAX / 1024 / 1024).toFixed(2)} MB`);
     setError('');
     setFiles(old => [...old, ...incoming.filter(file => !old.some(existing => existing.name === file.name && existing.size === file.size))].slice(0, 10));
   };

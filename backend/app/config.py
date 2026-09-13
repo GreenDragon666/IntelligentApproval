@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     storage_root: Path = _REPOSITORY_ROOT / "runtime/reviews"
     algorithm_root: Path = _REPOSITORY_ROOT / "algorithm"
     policy_rules_path: Path = _REPOSITORY_ROOT / "data/policy_rules.json"
-    max_upload_bytes: int = 30 * 1024 * 1024
+    max_upload_bytes: int = 64 * 1024 * 1024
     max_documents_per_review: int = 10
     upload_chunk_bytes: int = 1024 * 1024
     celery_worker_prefetch_multiplier: int = 1
