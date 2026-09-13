@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import subprocess
@@ -333,6 +334,21 @@ def _extract_with_pdftotext(path: Path) -> list[str] | None:
     return [_normalize(page) for page in pages]
 
 
+def _text_extraction_score(texts: list[str]) -> tuple[int, int]:
+    """返回非空页数和非空白字符数，用于识别“调用成功但结果全空”。"""
+    compact_lengths = [len(re.sub(r"\s+", "", text)) for text in texts]
+    return sum(length > 0 for length in compact_lengths), sum(compact_lengths)
+
+
+def _usable_extraction(texts: list[str]) -> bool:
+    """过滤只有空页或少量封面字的结果，允许后续提取器继续尝试。"""
+    nonempty_pages, characters = _text_extraction_score(texts)
+    if not texts or characters < 20:
+        return False
+    minimum_nonempty_pages = max(1, math.ceil(len(texts) * 0.05))
+    return characters >= max(20, len(texts) * 8) and nonempty_pages >= minimum_nonempty_pages
+
+
 def extract_pdf_pages(
     path: str | Path,
     *,
@@ -348,14 +364,21 @@ def extract_pdf_pages(
     if document_page_1_pdf_page is None and auto_detect_document_page:
         document_page_1_pdf_page = detect_document_page_1(pdf_path).document_page_1_pdf_page
     texts: list[str] | None = None
+    best_score = (-1, -1)
     errors: list[str] = []
     for extractor in (_extract_with_fitz, _extract_with_pypdf, _extract_with_pdftotext):
         try:
-            texts = extractor(pdf_path)
+            candidate = extractor(pdf_path)
         except Exception as exc:
             errors.append(f"{extractor.__name__}: {exc!r}")
             continue
-        if texts is not None:
+        if candidate is None:
+            continue
+        score = _text_extraction_score(candidate)
+        if score > best_score:
+            texts, best_score = candidate, score
+        if _usable_extraction(candidate):
+            texts = candidate
             break
     if texts is None:
         raise PdfExtractionError(

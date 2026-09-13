@@ -237,7 +237,8 @@ conda activate approval
 pip install -r requirements.txt
 ```
 
-Office 文档转换依赖系统 `libreoffice`/`soffice`。扫描 PDF 当前仍不包含 OCR；没有可提取文字时文档会失败并写入 `task-error.log`。
+Office 文档转换依赖系统 `libreoffice`/`soffice`。PDF 会依次尝试 PyMuPDF、pypdf 和 `pdftotext`；某个提取器返回全空文本时也会自动降级。
+三种方式都没有可用文字时，才会按扫描文档处理；当前仍未集成 OCR，会失败并写入 `task-error.log`。
 
 ### 7.2 PostgreSQL 与 Redis
 
