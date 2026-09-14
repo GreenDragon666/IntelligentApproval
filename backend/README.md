@@ -28,3 +28,14 @@ python -m compileall -q backend
 ```
 
 这些测试不连接 PostgreSQL、Redis 或 vLLM。完整联调必须在服务器启动依赖后进行。
+
+## 不打开前端批量审查
+
+后端服务和 worker 启动后，可以直接把一个目录中的待审文件作为同一批任务上传：
+
+```bash
+bash scripts/backend/run_batch_review.sh "/待审文件目录"
+```
+
+脚本调用与前端相同的 `POST /api/reviews`，自动轮询至终态，并将简报、汇总 JSON 及逐文件详情保存到
+`BATCH_REVIEW_OUTPUT_ROOT/<review_id>/`。单批数量受 `MAX_DOCUMENTS_PER_REVIEW` 限制，默认 10 份。

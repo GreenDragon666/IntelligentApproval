@@ -95,6 +95,16 @@ bash scripts/backend/smoke_review.sh "/待测试文件/招标文件1.pdf"
 脚本会自动上传、轮询、打印最终 JSON，不需要手工复制任务 ID。任务产物位于
 `STORAGE_ROOT/<review UUID>/`；任务、文档状态、算法原始结果和页面规范化结果位于 PostgreSQL。
 
+不打开前端，直接批量提交一个目录中的文件：
+
+```bash
+bash scripts/backend/run_batch_review.sh "/待审文件目录"
+```
+
+它使用与前端相同的 `POST /api/reviews` 接口，等待整批完成后，将简要报告、汇总 JSON 和每份文件的
+详细结果下载到 `BATCH_REVIEW_OUTPUT_ROOT/<review_id>/`。默认单批最多 10 份，由
+`MAX_DOCUMENTS_PER_REVIEW` 控制；脚本不会把超限目录静默拆成多个独立审查任务。
+
 最后可打开：
 
 - OpenAPI：`http://服务器IP:8000/docs`
